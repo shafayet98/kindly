@@ -1,0 +1,17 @@
+# dependencies
+node_modules/
+
+# builds
+.next/
+dist/
+out/
+
+# env files (never commit secrets)
+.env
+.env.*
+!.env.example
+
+# misc
+.DS_Store
+*.log
+coverage/
