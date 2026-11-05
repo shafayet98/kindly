@@ -1,17 +1,34 @@
 # dependencies
-node_modules/
+/node_modules
 
-# builds
-.next/
-dist/
-out/
+# testing
+/coverage
+/test-results
+/playwright-report
 
-# env files (never commit secrets)
-.env
-.env.*
-!.env.example
+# next.js
+/.next/
+/out/
+
+# production
+/build
+/dist
 
 # misc
 .DS_Store
+*.pem
 *.log
-coverage/
+
+# env files (never commit secrets)
+.env*
+!.env.example
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# local logs
+/logs
