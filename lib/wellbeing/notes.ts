@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, isNull, or } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, lt, or } from "drizzle-orm";
 import { audit } from "@/lib/audit";
 import { getConsentState } from "@/lib/consent/store";
 import { db, schema } from "@/lib/db";
@@ -40,4 +40,10 @@ export async function listWellbeingNotes(userId: string) {
 export async function deleteWellbeingNote(userId: string, noteId: string) {
   await db.delete(schema.wellbeingNotes).where(and(eq(schema.wellbeingNotes.id, noteId), eq(schema.wellbeingNotes.userId, userId)));
   await audit({ actorUserId: userId, actorType: "patient", resourceType: "wellbeing_note", resourceId: noteId, action: "wellbeing_note.deleted", result: "success" });
+}
+
+/** Permanently deletes notes past their retention date. Returns how many were removed. */
+export async function purgeExpiredNotes() {
+  const removed = await db.delete(schema.wellbeingNotes).where(lt(schema.wellbeingNotes.expiresAt, new Date())).returning({ id: schema.wellbeingNotes.id });
+  return removed.length;
 }

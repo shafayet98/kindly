@@ -10,6 +10,7 @@ import { checkCallEligibility } from "@/lib/telephony/eligibility";
 import { queueOnDemandCall } from "@/lib/scheduling/jobs";
 import { consumeToken, issueToken } from "@/lib/telephony/stream-tokens";
 import { handleTwilioMediaStream, type AuthorizedCall } from "@/lib/voice/twilio-realtime";
+import { purgeExpiredNotes } from "@/lib/wellbeing/notes";
 import { applyCallStatus, startScheduler } from "./scheduler";
 
 // Request logging is off: Twilio URLs carry one-time tokens. Routes log what matters themselves.
@@ -92,6 +93,18 @@ if (env.NODE_ENV !== "production") {
     return queued.ok ? { queued: queued.jobId } : reply.code(429).send({ error: queued.reason });
   });
 }
+
+// Retention: expired private wellbeing notes are deleted, not just hidden.
+const purge = async () => {
+  try {
+    const removed = await purgeExpiredNotes();
+    if (removed) app.log.info({ removed }, "expired wellbeing notes deleted");
+  } catch (error) {
+    app.log.error({ err: error instanceof Error ? error.message : "unknown" }, "note retention purge failed");
+  }
+};
+void purge();
+setInterval(purge, 60 * 60_000);
 
 if (env.SCHEDULER_ENABLED) {
   startScheduler({ env, twilio: twilioClient, log: app.log });

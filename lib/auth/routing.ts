@@ -26,6 +26,7 @@ const PROTECTED_PREFIXES = [
   "/care-sharing",
   "/settings",
   "/check-in",
+  "/activity",
   "/clinician",
   "/auth/reset-password",
 ];

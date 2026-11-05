@@ -9,6 +9,7 @@ const LINKS = [
   { href: "/settings/privacy", title: "Privacy & data", detail: "Permissions, what's remembered, export and deletion." },
   { href: "/schedule", title: "Reminders & calls", detail: "Times, quiet hours, and pausing calls." },
   { href: "/care-sharing", title: "Care sharing", detail: "What your clinician can see." },
+  { href: "/activity", title: "Conversation activity", detail: "Who you spoke with and what they did (no audio or words)." },
 ];
 
 export default async function SettingsPage() {
