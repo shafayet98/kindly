@@ -1,0 +1,43 @@
+{
+  "name": "kindly",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "realtime": "tsx realtime-server/index.ts",
+    "dev:phone": "bash scripts/dev-phone.sh",
+    "call:me": "tsx scripts/call-me.ts"
+  },
+  "dependencies": {
+    "@fastify/formbody": "^9.0.1",
+    "@fastify/websocket": "11.3.7",
+    "@openai/agents": "0.21.0",
+    "@openai/agents-extensions": "0.21.0",
+    "fastify": "5.12.8",
+    "next": "16.4.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "twilio": "6.2.0",
+    "ws": "^8.22.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/turbopack": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/ws": "^8.18.2",
+    "dotenv": "^18.0.9",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.5",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.15",
+    "typescript": "^5"
+  },
+  "packageManager": "pnpm@10.33.2",
+  "type": "module"
+}
