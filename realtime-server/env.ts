@@ -26,5 +26,13 @@ const schema = z.object({
   CALL_MAX_DURATION_SECONDS: z.coerce.number().int().min(30).max(1800).default(300),
 });
 
-export const env = schema.parse(process.env);
+// Hosting platforms (e.g. Railway) provide PORT; REALTIME_PORT wins when both are set.
+const source = { ...process.env, REALTIME_PORT: process.env.REALTIME_PORT ?? process.env.PORT };
+
+export const env = schema
+  .refine((value) => value.NODE_ENV !== "production" || value.PUBLIC_BASE_URL.startsWith("https://"), {
+    message: "PUBLIC_BASE_URL must be https in production (Twilio webhooks and media streams)",
+    path: ["PUBLIC_BASE_URL"],
+  })
+  .parse(source);
 export type Env = typeof env;

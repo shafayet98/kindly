@@ -21,7 +21,8 @@
     "voice:smoke": "tsx scripts/voice-smoke.ts",
     "phone:smoke": "tsx scripts/phone-bridge-smoke.ts",
     "scheduler:check": "tsx scripts/scheduler-check.ts",
-    "voice:smoke:health": "tsx scripts/voice-smoke-health.ts"
+    "voice:smoke:health": "tsx scripts/voice-smoke-health.ts",
+    "safety:smoke": "tsx scripts/safety-smoke.ts"
   },
   "dependencies": {
     "@fastify/formbody": "^9.0.1",
@@ -40,7 +41,9 @@
     "server-only": "^0.0.1",
     "twilio": "6.2.0",
     "ws": "^8.22.1",
-    "zod": "^4.6.7"
+    "zod": "^4.6.7",
+    "tsx": "^4.23.15",
+    "dotenv": "^18.0.9"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",
@@ -49,13 +52,11 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/ws": "^8.18.2",
-    "dotenv": "^18.0.9",
     "drizzle-kit": "^0.31.11",
     "eslint": "^9",
     "eslint-config-next": "16.4.5",
     "pino": "^10.4.0",
     "tailwindcss": "^4",
-    "tsx": "^4.23.15",
     "typescript": "^5",
     "vitest": "^5.1.0"
   },

@@ -28,6 +28,13 @@ test("browser call: agent speaks, UI switch keeps the same session, end call is 
       return { state: session.state, agent: session.active_agent, events: events.map((event) => `${event.event_type}:${event.structured_payload.via ?? ""}`) };
     })
     .toEqual({ state: "ended", agent: "sarah", events: ["session_started:", "handoff:ui", "session_ended:"] });
+
+  // The structured timeline is visible to the person (demo step: show handoffs after the call).
+  await page.goto("/activity");
+  const latest = page.getByRole("region").first();
+  await expect(latest).toContainText("Milo joined (browser)");
+  await expect(latest).toContainText("Milo handed over to Sarah (you pressed a button)");
+  await expect(latest).toContainText("Call ended");
 });
 
 test.describe("voice API security", () => {

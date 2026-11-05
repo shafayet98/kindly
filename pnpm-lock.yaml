@@ -26,6 +26,9 @@ importers:
       '@supabase/supabase-js':
         specifier: ^2.119.0
         version: 2.119.0
+      dotenv:
+        specifier: ^18.0.9
+        version: 18.0.9
       drizzle-orm:
         specifier: 0.45.4
         version: 0.45.4(postgres@3.4.9)
@@ -50,6 +53,9 @@ importers:
       server-only:
         specifier: ^0.0.1
         version: 0.0.1
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
       twilio:
         specifier: 6.2.0
         version: 6.2.0
@@ -78,9 +84,6 @@ importers:
       '@types/ws':
         specifier: ^8.18.2
         version: 8.18.2
-      dotenv:
-        specifier: ^18.0.9
-        version: 18.0.9
       drizzle-kit:
         specifier: ^0.31.11
         version: 0.31.11
@@ -96,9 +99,6 @@ importers:
       tailwindcss:
         specifier: ^4
         version: 4.3.4
-      tsx:
-        specifier: ^4.23.15
-        version: 4.23.15
       typescript:
         specifier: ^5
         version: 5.9.3

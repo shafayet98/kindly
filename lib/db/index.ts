@@ -9,7 +9,9 @@ const globalForDb = globalThis as unknown as { kindlySql?: postgres.Sql };
 function createSql() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error("DATABASE_URL is not set");
-  return postgres(url, { max: 5, idle_timeout: 20 });
+  // Serverless functions (Vercel) each get one connection; long-running servers share a small pool.
+  // Supabase's transaction pooler (port 6543) doesn't support prepared statements.
+  return postgres(url, { max: process.env.VERCEL ? 1 : 5, idle_timeout: 20, prepare: !url.includes(":6543/") });
 }
 
 const sql = globalForDb.kindlySql ?? createSql();

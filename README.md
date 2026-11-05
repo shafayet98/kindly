@@ -4,6 +4,8 @@ A voice-first, multi-agent health and wellbeing companion. Built for the Future 
 
 > Prototype. Fictional data only — no real patient data. Kindly's companions are AI; it is not a medical or emergency service.
 
+**Docs:** [Deployment guide](docs/DEPLOYMENT.md) · [Demo runbook](docs/DEMO_RUNBOOK.md)
+
 ## Stack
 
 - **Web app:** Next.js 16 (App Router), React 19, Tailwind CSS 4
@@ -56,6 +58,7 @@ The scheduler only runs when `SCHEDULER_ENABLED=true`, so starting the server an
 | `pnpm voice:smoke` | Text-only conversation with the live agents: tools, handoffs, Sarah privacy pruning (real Realtime API, a few cents) |
 | `pnpm scheduler:check` | Runs the call scheduler against the database with a **fake** Twilio client (never dials): consent, races, retries, pause, quiet hours, expiry, errors |
 | `pnpm voice:smoke:health` | Natalie logs a check-in, corrects it, asks Iris for progress and agrees a smaller goal with Theo (real Realtime API; run `pnpm demo:reset` after) |
+| `pnpm safety:smoke` | Emergency and suicidal-distress messages trigger the predefined safety workflow, dosing advice is declined, prompt injection can't reach other users (real Realtime API) |
 | `pnpm phone:smoke` | Drives the Twilio media-stream bridge with a simulated Twilio client: forged/replayed tokens rejected, Milo audio returned |
 | `pnpm db:generate` / `pnpm db:migrate` | Create / apply Drizzle migrations |
 
