@@ -3,7 +3,13 @@ import { getCallSettings } from "@/lib/calls/settings";
 import { db, schema } from "@/lib/db";
 import { describeReminder, getOwnedReminder } from "@/lib/reminders/service";
 import { formatDays, formatTime12h } from "@/lib/scheduling/occurrences";
-import { executeAction, proposeAction } from "../confirmations";
+import { HabitError, correctHabitEvent, logHabitEvent, recentHabitEvents } from "@/lib/habits/service";
+import { loadInsights } from "@/lib/insights/load";
+import { createPlanProposal, PlanError } from "@/lib/plans/service";
+import { addDays, localDate, zonedTimeToUtc } from "@/lib/time";
+import { recordAgentEvent } from "@/lib/voice/sessions";
+import { listWellbeingNotes, saveWellbeingNote, WellbeingNoteError } from "@/lib/wellbeing/notes";
+import { declineAction, executeAction, proposeAction } from "../confirmations";
 import { SAFETY_MESSAGES } from "@/lib/safety/messages";
 import type { ToolContext, ToolHandlers } from "./types";
 
@@ -84,6 +90,101 @@ export const handlers: ToolHandlers = {
     const outcome = await executeAction(ctx, input.confirmation_id);
     if (!outcome.ok) return { error: outcome.error };
     return { done: true, result: outcome.summary, next_reminder_due: outcome.nextDue?.toISOString() ?? null };
+  },
+
+  async decline_action(ctx, input) {
+    if (!UUID.test(input.confirmation_id)) return { error: "Unknown confirmation id." };
+    return (await declineAction(ctx, input.confirmation_id)) ? { declined: true, note: "Nothing was changed." } : { error: "Nothing pending with that id." };
+  },
+
+  async log_habit(ctx, input) {
+    const date = addDays(localDate(new Date(), ctx.timezone), -input.days_ago);
+    const now = new Date();
+    const occurredAt = input.days_ago === 0 ? now : zonedTimeToUtc(date, "12:00", ctx.timezone);
+    try {
+      const event = await logHabitEvent(
+        ctx.userId,
+        { kind: input.kind, value: input.value, unit: input.value === null ? null : input.unit, description: input.description, occurredAt, certainty: input.certainty },
+        { type: "agent", agent: ctx.agent },
+      );
+      return { saved: true, entry_id: event.id, note: "Saved as patient-reported." };
+    } catch (error) {
+      if (error instanceof HabitError) return { error: error.message };
+      throw error;
+    }
+  },
+
+  async correct_habit(ctx, input) {
+    if (!UUID.test(input.entry_id)) return { error: "Unknown entry. Call get_recent_habits first." };
+    try {
+      const changes: { value?: number | null; description?: string | null } = {};
+      if (input.value !== null) changes.value = input.value;
+      if (input.description !== null) changes.description = input.description;
+      const { corrected } = await correctHabitEvent(ctx.userId, input.entry_id, changes, { type: "agent", agent: ctx.agent });
+      return { corrected: true, entry_id: corrected.id, value: corrected.value, description: corrected.description };
+    } catch (error) {
+      if (error instanceof HabitError) return { error: error.message };
+      throw error;
+    }
+  },
+
+  async get_recent_habits(ctx) {
+    const events = await recentHabitEvents(ctx.userId, new Date(Date.now() - 14 * 86_400_000), 40);
+    return {
+      entries: events.map((event) => ({
+        entry_id: event.id,
+        kind: event.kind,
+        date: localDate(event.occurredAt, ctx.timezone),
+        value: event.value,
+        unit: event.unit,
+        description: event.description,
+      })),
+    };
+  },
+
+  async get_progress(ctx) {
+    if (ctx.agent !== "iris") {
+      await recordAgentEvent({ sessionId: ctx.sessionId, userId: ctx.userId, agent: ctx.agent, eventType: "delegation", payload: { from: ctx.agent, to: "iris", task: "progress_summary" } });
+    }
+    const insights = await loadInsights(ctx.userId, ctx.timezone, 4);
+    return {
+      prepared_by: "Iris",
+      goals: insights.goals.map((goal) => ({ goal_id: goal.goalId, title: goal.title, summary: goal.statement.text, weeks: goal.weeks.map((w) => `${w.weekStart}: ${w.count}/${w.target}`) })),
+      observations: insights.observations.map((s) => s.text),
+      patterns_to_ask_about_not_conclusions: insights.hypotheses.map((s) => s.text),
+      missing_data: insights.missingData.map((s) => s.text),
+    };
+  },
+
+  async propose_plan_adjustment(ctx, input) {
+    if (!UUID.test(input.goal_id)) return { error: "Unknown goal. Call get_goals first." };
+    const change: { timesPerWeek?: number; minutes?: number; title?: string } = {};
+    if (input.times_per_week !== null) change.timesPerWeek = input.times_per_week;
+    if (input.minutes !== null) change.minutes = input.minutes;
+    if (input.new_title !== null) change.title = input.new_title;
+    try {
+      const { proposalId, summary } = await createPlanProposal(ctx.userId, input.goal_id, change, `Barrier (patient's words): ${input.barrier_in_their_words}`);
+      const confirmationId = await proposeAction(ctx, { kind: "plan.adjust", payload: { proposalId } }, summary);
+      return { confirmation_id: confirmationId, summary, prepared_by: "Theo", next_step: ASK };
+    } catch (error) {
+      if (error instanceof PlanError) return { error: error.message };
+      throw error;
+    }
+  },
+
+  async save_wellbeing_note(ctx, input) {
+    try {
+      await saveWellbeingNote(ctx.userId, input.note);
+      return { saved: true, note: "Kept privately for 30 days. Not shared with anyone." };
+    } catch (error) {
+      if (error instanceof WellbeingNoteError) return { error: error.message };
+      throw error;
+    }
+  },
+
+  async get_wellbeing_notes(ctx) {
+    const notes = await listWellbeingNotes(ctx.userId);
+    return { notes: notes.slice(0, 10).map((note) => ({ date: localDate(note.createdAt, ctx.timezone), note: note.content })) };
   },
 
   async get_call_preferences(ctx) {

@@ -40,7 +40,10 @@ async function main() {
 
   // Remove previous demo identities; app rows cascade from auth.users.
   const existing = await db.execute<{ id: string }>(sql`select id from auth.users where lower(email) in ${emails}`);
-  for (const row of existing) await admin.auth.admin.deleteUser(row.id);
+  for (const row of existing) {
+    const { error } = await admin.auth.admin.deleteUser(row.id);
+    if (error) throw new Error(`Could not remove previous demo account ${row.id}: ${error.message}`);
+  }
   await db.delete(schema.clinicianInvitations).where(sql`lower(${schema.clinicianInvitations.invitedEmail}) in ${emails}`);
 
   const ids: Record<keyof typeof DEMO_ACCOUNTS, string> = { alex: "", priya: "", clinician: "" };

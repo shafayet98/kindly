@@ -188,7 +188,7 @@ export const clinicianRelationships = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     status: relationshipStatus("status").notNull().default("pending"),
-    consentId: uuid("consent_id").references(() => consents.id),
+    consentId: uuid("consent_id").references(() => consents.id, { onDelete: "set null" }),
     createdAt: createdAt(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
   },
@@ -210,7 +210,7 @@ export const goals = pgTable(
     target: jsonb("target").$type<Record<string, unknown>>().notNull().default({}),
     status: goalStatus("status").notNull().default("active"),
     // Set only for clinician-approved plans; self-chosen goals leave it null.
-    approvedBy: uuid("approved_by").references(() => users.id),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
     planVersion: integer("plan_version").notNull().default(1),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -237,7 +237,7 @@ export const habitEvents = pgTable(
     certainty: certainty("certainty").notNull().default("medium"),
     recordedByAgent: agentName("recorded_by_agent"),
     // A correction is a new row pointing at the row it replaces; the old row gets superseded_at.
-    correctedFrom: uuid("corrected_from").references((): AnyPgColumn => habitEvents.id),
+    correctedFrom: uuid("corrected_from").references((): AnyPgColumn => habitEvents.id, { onDelete: "set null" }),
     supersededAt: timestamp("superseded_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
@@ -432,9 +432,10 @@ export const reportShares = pgTable(
     clinicianId: uuid("clinician_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    // A share can't outlive the consent behind it (revocation or account deletion).
     consentId: uuid("consent_id")
       .notNull()
-      .references(() => consents.id),
+      .references(() => consents.id, { onDelete: "cascade" }),
     sharedAt: timestamp("shared_at", { withTimezone: true }).notNull().defaultNow(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     // Set only by a real, logged clinician action.

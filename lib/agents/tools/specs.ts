@@ -68,6 +68,72 @@ export const TOOL_SPECS = {
     parameters: z.object({ confirmation_id: id }),
     agents: ["milo", "natalie"],
   }),
+  decline_action: spec({
+    name: "decline_action",
+    description: "The person said no to a proposed change. Records the decision; nothing changes.",
+    parameters: z.object({ confirmation_id: id }),
+    agents: ["milo", "natalie"],
+  }),
+  log_habit: spec({
+    name: "log_habit",
+    description:
+      "Save something the person reported about activity, food, smoking, sleep or mood. Use their own words in description. " +
+      "Only fill value and unit if they said a number; never estimate calories, distances or amounts they didn't give.",
+    parameters: z.object({
+      kind: z.enum(["activity", "food", "smoking", "sleep", "mood", "other"]),
+      description: z.string().min(1).max(300),
+      value: z.number().min(0).max(100000).nullable(),
+      unit: z.enum(["minutes", "hours", "cigarettes", "steps", "km", "servings"]).nullable(),
+      days_ago: z.number().int().min(0).max(6).describe("0 = today, 1 = yesterday"),
+      certainty: z.enum(["low", "medium", "high"]).describe("How sure the person sounded"),
+    }),
+    agents: ["natalie"],
+  }),
+  correct_habit: spec({
+    name: "correct_habit",
+    description: "Correct an entry the person says was wrong (e.g. 20 minutes, not 30). Get the entry id from get_recent_habits.",
+    parameters: z.object({ entry_id: id, value: z.number().min(0).max(100000).nullable(), description: z.string().max(300).nullable() }),
+    agents: ["natalie"],
+  }),
+  get_recent_habits: spec({
+    name: "get_recent_habits",
+    description: "The person's check-ins from the last 14 days, newest first, with entry ids.",
+    parameters: z.object({}),
+    agents: ["natalie"],
+  }),
+  get_progress: spec({
+    name: "get_progress",
+    description: "Iris's factual summary of the last 4 weeks: goals met per week, patterns to discuss (not conclusions), and missing data.",
+    parameters: z.object({}),
+    agents: ["natalie", "theo"],
+  }),
+  propose_plan_adjustment: spec({
+    name: "propose_plan_adjustment",
+    description:
+      "Theo's planning service. After the person has told you what got in the way, propose a smaller or easier version of one goal. " +
+      "Nothing changes yet: read the summary and ask them to confirm, then call confirm_action.",
+    parameters: z.object({
+      goal_id: id,
+      times_per_week: z.number().int().min(1).max(14).nullable(),
+      minutes: z.number().int().min(1).max(240).nullable(),
+      new_title: z.string().min(3).max(80).nullable(),
+      barrier_in_their_words: z.string().min(2).max(300),
+    }),
+    agents: ["natalie", "theo"],
+  }),
+  save_wellbeing_note: spec({
+    name: "save_wellbeing_note",
+    description:
+      "Keep a short private note for the person, only after they explicitly ask or agree. Private: never shared with other companions or clinicians.",
+    parameters: z.object({ note: z.string().min(2).max(600) }),
+    agents: ["sarah"],
+  }),
+  get_wellbeing_notes: spec({
+    name: "get_wellbeing_notes",
+    description: "The person's private notes with you from the last 30 days.",
+    parameters: z.object({}),
+    agents: ["sarah"],
+  }),
   get_call_preferences: spec({
     name: "get_call_preferences",
     description: "Whether phone calls are on or paused, quiet hours and the daily call limit.",
