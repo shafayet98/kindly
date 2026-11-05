@@ -15,6 +15,13 @@
       "when": 1793882656935,
       "tag": "0001_confirmations_and_job_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793885400427,
+      "tag": "0002_fix_delete_cascades",
+      "breakpoints": true
     }
   ]
 }

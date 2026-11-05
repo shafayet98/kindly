@@ -8,7 +8,8 @@ const STEPS = [
   { title: "Real actions, your permission", body: "Companions move reminders and adjust plans only after you say yes. Nothing is shared unless you choose." },
 ];
 
-export default function LandingPage() {
+export default async function LandingPage({ searchParams }: PageProps<"/">) {
+  const { deleted } = await searchParams;
   return (
     <div className="flex flex-1 flex-col">
       <header className="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-4">
@@ -22,6 +23,11 @@ export default function LandingPage() {
       </header>
 
       <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-16 px-4 py-10">
+        {deleted === "1" && (
+          <p role="status" className="rounded-xl border border-primary/30 bg-primary-soft px-4 py-3">
+            Your account and data have been deleted.
+          </p>
+        )}
         <section className="flex max-w-2xl flex-col gap-5">
           <h1 className="text-4xl leading-tight font-extrabold sm:text-5xl">
             A team of AI companions who call, listen, and help healthy habits stick.

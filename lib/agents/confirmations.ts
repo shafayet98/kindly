@@ -9,6 +9,7 @@ import {
   setReminderStatus,
   type ReminderFields,
 } from "@/lib/reminders/service";
+import { applyPlanProposal, PlanError, rejectPlanProposal } from "@/lib/plans/service";
 import type { ToolContext } from "./tools/types";
 
 const CONFIRMATION_TTL_MS = 10 * 60_000;
@@ -16,7 +17,8 @@ const CONFIRMATION_TTL_MS = 10 * 60_000;
 type Action =
   | { kind: "reminder.reschedule"; payload: { reminderId: string; localTime?: string; daysOfWeek?: number[] } }
   | { kind: "reminder.status"; payload: { reminderId: string; status: "active" | "paused" | "cancelled" } }
-  | { kind: "reminder.create"; payload: ReminderFields };
+  | { kind: "reminder.create"; payload: ReminderFields }
+  | { kind: "plan.adjust"; payload: { proposalId: string } };
 
 /** Stores a proposed high-impact action. Nothing changes until it is confirmed. */
 export async function proposeAction(ctx: ToolContext, action: Action, summary: string) {
@@ -32,14 +34,16 @@ export async function proposeAction(ctx: ToolContext, action: Action, summary: s
       expiresAt: new Date(Date.now() + CONFIRMATION_TTL_MS),
     })
     .returning({ id: schema.actionConfirmations.id });
-  // Reminder work belongs to Milo. When another companion asks, record it as a delegation.
-  if (ctx.agent !== "milo") {
+  // Reminder work belongs to Milo and plan changes to Theo. When another companion asks, record
+  // it as a delegation.
+  const owner = action.kind.startsWith("plan.") ? "theo" : "milo";
+  if (ctx.agent !== owner) {
     await recordAgentEvent({
       sessionId: ctx.sessionId,
       userId: ctx.userId,
       agent: ctx.agent,
       eventType: "delegation",
-      payload: { from: ctx.agent, to: "milo", task: action.kind, confirmationId: row.id },
+      payload: { from: ctx.agent, to: owner, task: action.kind, confirmationId: row.id },
     });
   }
   return row.id;
@@ -89,13 +93,31 @@ export async function executeAction(ctx: ToolContext, confirmationId: string) {
         nextDue = result.nextDue;
         break;
       }
+      case "plan.adjust": {
+        const result = await applyPlanProposal(ctx.userId, action.payload.proposalId);
+        summary = `Saved: ${result.summary}`;
+        nextDue = null;
+        break;
+      }
     }
-    await recordAgentEvent({ sessionId: ctx.sessionId, userId: ctx.userId, agent: "milo", eventType: "action_executed", payload: { kind: action.kind, confirmationId, requestedBy: ctx.agent } });
+    const executor = action.kind.startsWith("plan.") ? "theo" : "milo";
+    await recordAgentEvent({ sessionId: ctx.sessionId, userId: ctx.userId, agent: executor, eventType: "action_executed", payload: { kind: action.kind, confirmationId, requestedBy: ctx.agent } });
     return { ok: true as const, summary, nextDue };
   } catch (error) {
     // Release the claim so the person can try again; nothing was saved.
     await db.update(schema.actionConfirmations).set({ status: "pending", executedAt: null }).where(eq(schema.actionConfirmations.id, confirmationId));
-    if (error instanceof ReminderError) return { ok: false as const, error: error.message };
+    if (error instanceof ReminderError || error instanceof PlanError) return { ok: false as const, error: error.message };
     throw error;
   }
+}
+
+/** The person said no. Records the decision so it can't be confirmed later. */
+export async function declineAction(ctx: ToolContext, confirmationId: string) {
+  const [declined] = await db
+    .update(schema.actionConfirmations)
+    .set({ status: "rejected" })
+    .where(and(eq(schema.actionConfirmations.id, confirmationId), eq(schema.actionConfirmations.userId, ctx.userId), eq(schema.actionConfirmations.status, "pending")))
+    .returning({ kind: schema.actionConfirmations.kind, payload: schema.actionConfirmations.payload });
+  if (declined?.kind === "plan.adjust") await rejectPlanProposal(ctx.userId, String(declined.payload.proposalId));
+  return Boolean(declined);
 }

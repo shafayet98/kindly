@@ -55,6 +55,7 @@ The scheduler only runs when `SCHEDULER_ENABLED=true`, so starting the server an
 | `pnpm test:e2e` | Playwright browser tests against the real Supabase project, including a real browser voice call with a fake microphone (needs `.env`; local only; resets demo data first) |
 | `pnpm voice:smoke` | Text-only conversation with the live agents: tools, handoffs, Sarah privacy pruning (real Realtime API, a few cents) |
 | `pnpm scheduler:check` | Runs the call scheduler against the database with a **fake** Twilio client (never dials): consent, races, retries, pause, quiet hours, expiry, errors |
+| `pnpm voice:smoke:health` | Natalie logs a check-in, corrects it, asks Iris for progress and agrees a smaller goal with Theo (real Realtime API; run `pnpm demo:reset` after) |
 | `pnpm phone:smoke` | Drives the Twilio media-stream bridge with a simulated Twilio client: forged/replayed tokens rejected, Milo audio returned |
 | `pnpm db:generate` / `pnpm db:migrate` | Create / apply Drizzle migrations |
 
@@ -65,6 +66,15 @@ The scheduler only runs when `SCHEDULER_ENABLED=true`, so starting the server an
 - Browser calls use WebRTC with a 60-second OpenAI client secret from `/api/voice/session` (consent + hourly limit checked). Tool calls go to `/api/voice/tools`, which checks the session belongs to the signed-in user.
 - Moving into or out of Sarah deletes earlier conversation items from the live model context (`lib/voice/privacy.ts`).
 - Only structured events are stored (`call_sessions`, `agent_events`): no audio, no transcripts.
+
+## Health, wellbeing and care sharing
+
+- **Check-ins** (`habit_events`) are always `patient_reported` with a certainty level; numbers are stored only when the person gave one. A correction is a new row (`corrected_from`), and the original is kept but superseded. Logging requires the `health_data_processing` consent.
+- **Iris** (`lib/insights/iris.ts`) is deterministic, not generative: weekly goal counts, reported averages, co-occurring reports labelled as hypotheses, and missing data. Every statement lists its source record ids.
+- **Theo** plan changes are stored as `plan_proposals` and applied only through `confirm_action`; clinician-approved goals can't be changed.
+- **Sarah's notes** (`wellbeing_notes`) need the `sensitive_wellbeing` consent, are readable only by Sarah's tools and the person, expire after 30 days, and are never included in reports.
+- **Clara reports** are built from Iris output for the scopes the person picks. Sharing is per report and per clinician, each with its own consent record; revoking removes access immediately. Clinicians see a report only through an active share and an active care relationship. Every view is audited, and "reviewed" is only set by the clinician.
+- **Privacy & data:** per-purpose permissions, note deletion, JSON export (`/api/me/export`) and permanent account deletion (everything cascades from the auth identity).
 
 ## Known MVP shortcuts
 

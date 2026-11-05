@@ -20,7 +20,8 @@
     "test:e2e": "playwright test",
     "voice:smoke": "tsx scripts/voice-smoke.ts",
     "phone:smoke": "tsx scripts/phone-bridge-smoke.ts",
-    "scheduler:check": "tsx scripts/scheduler-check.ts"
+    "scheduler:check": "tsx scripts/scheduler-check.ts",
+    "voice:smoke:health": "tsx scripts/voice-smoke-health.ts"
   },
   "dependencies": {
     "@fastify/formbody": "^9.0.1",
