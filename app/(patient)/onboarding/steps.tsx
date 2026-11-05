@@ -3,9 +3,22 @@ import { FOCUS_AREAS, type FocusAreaKey } from "@/lib/preferences/focus-areas";
 import type { GoalSuggestion } from "@/lib/preferences/suggestions";
 import { finishOnboarding, goBack, saveFocusAreasStep, saveGoalStep } from "./actions";
 
-export function FocusAreasStep({ selected }: { selected: FocusAreaKey[] }) {
+export function FocusAreasStep({ selected, nickname }: { selected: FocusAreaKey[]; nickname: string | null }) {
   return (
     <form action={saveFocusAreasStep} className="flex flex-col gap-6">
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="nickname" className="font-semibold">
+          What should we call you? <span className="font-normal text-muted">(optional)</span>
+        </label>
+        <input
+          id="nickname"
+          name="nickname"
+          maxLength={40}
+          autoComplete="given-name"
+          defaultValue={nickname ?? ""}
+          className="rounded-xl border border-border bg-surface px-4 py-3 sm:max-w-xs"
+        />
+      </div>
       <fieldset className="flex flex-col gap-4">
         <legend className="mb-1">
           <h1 className="text-2xl font-bold sm:text-3xl">What would you like Kindly to help you with?</h1>

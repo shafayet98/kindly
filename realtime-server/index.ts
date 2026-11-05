@@ -3,8 +3,11 @@ import formbody from "@fastify/formbody";
 import websocket from "@fastify/websocket";
 import twilio from "twilio";
 import { env } from "./env";
+import { eq } from "drizzle-orm";
+import { db, schema } from "@/lib/db";
+import { checkCallEligibility } from "@/lib/telephony/eligibility";
 import { bindToken, consumeToken, issueToken } from "@/lib/telephony/stream-tokens";
-import { handleTwilioMediaStream } from "@/lib/voice/twilio-realtime";
+import { handleTwilioMediaStream, type AuthorizedCall } from "@/lib/voice/twilio-realtime";
 
 // Request logging is off: Twilio URLs carry one-time tokens. Routes log what matters themselves.
 const app = Fastify({
@@ -45,7 +48,7 @@ app.post<{ Querystring: { t?: string }; Body: Record<string, string> }>("/twilio
     request.log.warn({ callSid }, "call answered without a valid call token; hanging up");
     response.hangup();
   } else {
-    const streamToken = issueToken("stream", 60_000, { callSid });
+    const streamToken = issueToken("stream", 60_000, callToken);
     const stream = response.connect().stream({ url: streamUrl });
     stream.parameter({ name: "streamToken", value: streamToken });
     request.log.info({ callSid }, "call answered; opening media stream");
@@ -65,9 +68,9 @@ app.get("/twilio/media-stream", { websocket: true }, (socket, request) => {
     apiKey: env.OPENAI_API_KEY,
     model: env.REALTIME_MODEL,
     log: request.log,
-    authorize: (token) => {
-      const data = consumeToken(token, "stream");
-      return data?.callSid ? { callSid: data.callSid } : null;
+    authorize: (token, callSid) => {
+      const data = consumeToken(token, "stream") as AuthorizedCall | null;
+      return data && data.callSid === callSid ? data : null;
     },
   });
 });
@@ -76,17 +79,28 @@ if (env.NODE_ENV !== "production") {
   const COOLDOWN_MS = 30_000;
   let lastCallAt = 0;
 
-  // Development-only "call my phone now": only ever dials the verified demo number.
+  // Development-only "call my phone now": dials the user whose confirmed number is the verified
+  // demo number, and only if that user has opted in to calls.
   app.post("/dev/call-me", async (request, reply) => {
     if (request.headers["x-dev-token"] !== env.DEV_ADMIN_TOKEN) return reply.code(401).send();
     if (Date.now() - lastCallAt < COOLDOWN_MS) {
       return reply.code(429).send({ error: "Please wait 30 seconds between test calls." });
     }
+
+    const [user] = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.phoneE164, env.DEMO_CALL_TO_NUMBER)).limit(1);
+    if (!user) return reply.code(409).send({ error: "No user has the demo number. Run pnpm demo:reset." });
+    const eligibility = await checkCallEligibility(user.id);
+    if (!eligibility.ok) return reply.code(409).send({ error: `Calls not allowed for this user: ${eligibility.reason}` });
     lastCallAt = Date.now();
 
     // The call token goes into the answer URL, so it is issued before dialling and bound to
     // the CallSid once Twilio returns it (the answer URL is only fetched after pickup).
-    const pending = issueToken("call", 120_000);
+    const pending = issueToken("call", 120_000, {
+      userId: user.id,
+      timezone: eligibility.timezone,
+      opening: { reason: "test_call" },
+      startAgent: "milo",
+    } satisfies Omit<AuthorizedCall, "callSid">);
     try {
       const call = await twilioClient.calls.create({
         to: env.DEMO_CALL_TO_NUMBER,

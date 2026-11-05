@@ -16,10 +16,20 @@ async function setStep(userId: string, step: OnboardingStep) {
   await db.update(schema.patientProfiles).set({ onboardingStep: step }).where(eq(schema.patientProfiles.userId, userId));
 }
 
+const nickname = z
+  .string()
+  .trim()
+  .max(40)
+  .transform((value) => value.replace(/[\p{C}<>]/gu, ""));
+
 export async function saveFocusAreasStep(formData: FormData) {
   const user = await requirePatient();
   const skipped = formData.get("intent") === "skip";
   await setFocusAreas(user.id, skipped ? [] : formData.getAll("area"));
+  const name = nickname.safeParse(formData.get("nickname") ?? "");
+  if (name.success && name.data) {
+    await db.update(schema.patientProfiles).set({ nickname: name.data }).where(eq(schema.patientProfiles.userId, user.id));
+  }
   await setStep(user.id, "goal");
   redirect("/onboarding");
 }
