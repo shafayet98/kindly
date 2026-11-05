@@ -42,8 +42,18 @@ Approve or revoke a real clinician account (after they sign up and confirm their
 | Command | What it does |
 |---|---|
 | `pnpm lint` / `pnpm typecheck` / `pnpm test` | Checks run in CI |
-| `pnpm test:e2e` | Playwright browser tests against the real Supabase project (needs `.env`; local only) |
+| `pnpm test:e2e` | Playwright browser tests against the real Supabase project, including a real browser voice call with a fake microphone (needs `.env`; local only; resets demo data first) |
+| `pnpm voice:smoke` | Text-only conversation with the live agents: tools, handoffs, Sarah privacy pruning (real Realtime API, a few cents) |
+| `pnpm phone:smoke` | Drives the Twilio media-stream bridge with a simulated Twilio client: forged/replayed tokens rejected, Milo audio returned |
 | `pnpm db:generate` / `pnpm db:migrate` | Create / apply Drizzle migrations |
+
+## Voice architecture
+
+- Agents (`lib/agents/voice-agents.ts`) are defined once and used by both the phone server and the browser.
+- Tool **specs** (`lib/agents/tools/specs.ts`) are shared; tool **implementations** (`handlers.ts`) run only on the server through `runTool`, which enforces the per-agent allowlist and input schema. The user is always taken from the authenticated session (browser) or the server-issued call token (phone), never from model output.
+- Browser calls use WebRTC with a 60-second OpenAI client secret from `/api/voice/session` (consent + hourly limit checked). Tool calls go to `/api/voice/tools`, which checks the session belongs to the signed-in user.
+- Moving into or out of Sarah deletes earlier conversation items from the live model context (`lib/voice/privacy.ts`).
+- Only structured events are stored (`call_sessions`, `agent_events`): no audio, no transcripts.
 
 ## Known MVP shortcuts
 

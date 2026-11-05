@@ -17,7 +17,9 @@
     "test": "vitest run",
     "demo:reset": "tsx scripts/seed-demo.ts",
     "clinician:approve": "tsx scripts/approve-clinician.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "voice:smoke": "tsx scripts/voice-smoke.ts",
+    "phone:smoke": "tsx scripts/phone-bridge-smoke.ts"
   },
   "dependencies": {
     "@fastify/formbody": "^9.0.1",
@@ -29,6 +31,7 @@
     "drizzle-orm": "0.45.4",
     "fastify": "5.12.8",
     "next": "16.4.5",
+    "openai": "7.51.0",
     "postgres": "^3.4.9",
     "react": "19.3.0",
     "react-dom": "19.3.0",

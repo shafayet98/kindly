@@ -16,6 +16,7 @@ test.describe("first-time onboarding", () => {
     await expect(page).toHaveURL(/\/onboarding$/);
     await expect(page.getByRole("heading", { name: "What would you like Kindly to help you with?" })).toBeVisible();
 
+    await page.getByLabel(/What should we call you/).fill("Sam <b>");
     await page.getByLabel(/Health & healthy habits/).check();
     await page.getByLabel(/Emotional wellbeing/).check();
     await page.getByRole("button", { name: "Continue" }).click();
@@ -36,6 +37,7 @@ test.describe("first-time onboarding", () => {
     await expect(page.getByRole("heading", { name: "Your privacy choices" })).toBeVisible();
     await page.getByRole("button", { name: "Finish and go to my dashboard" }).click();
     await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Hi Sam b. How can we help today?");
     await expect(page.getByText("Walk three times a week")).toBeVisible();
     // Emotional wellbeing selected, so the feelings shortcut is ranked first.
     await expect(page.getByRole("list").filter({ hasText: "I'm feeling unwell" }).getByRole("link").first()).toHaveText("Talk about how I'm feeling");
