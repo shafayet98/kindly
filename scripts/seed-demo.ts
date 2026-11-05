@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import { appendFileSync } from "node:fs";
 import { sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
+import { scheduleNextJob } from "@/lib/scheduling/jobs";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { addDays, dayOfWeek, localDate, zonedTimeToUtc } from "@/lib/time";
 
@@ -67,7 +68,7 @@ async function main() {
       (["health_data_processing", "browser_voice", "outbound_calls"] as const).map((purpose) => ({ userId: ids.alex, purpose })),
     )
     .returning({ id: schema.consents.id, purpose: schema.consents.purpose });
-  await db.insert(schema.callPreferences).values({ userId: ids.alex, callsEnabled: true });
+  await db.insert(schema.callPreferences).values({ userId: ids.alex, callsEnabled: true, maxCallsPerDay: 3 });
   if (process.env.DEMO_CALL_TO_NUMBER) {
     await db.update(schema.users).set({ phoneE164: process.env.DEMO_CALL_TO_NUMBER, phoneConfirmedAt: now }).where(sql`${schema.users.id} = ${ids.alex}`);
   }
@@ -77,7 +78,7 @@ async function main() {
     .values({ userId: ids.alex, type: "activity", title: "Walk three times a week", target: { timesPerWeek: 3, minutes: 20 } })
     .returning({ id: schema.goals.id });
   await db.insert(schema.goals).values({ userId: ids.alex, type: "sleep", title: "In bed by 10:30 on weeknights", target: { nightsPerWeek: 5 } });
-  await db.insert(schema.reminders).values({
+  const [walkReminder] = await db.insert(schema.reminders).values({
     userId: ids.alex,
     goalId: walkGoal.id,
     title: "Morning walk",
@@ -85,7 +86,8 @@ async function main() {
     daysOfWeek: [1, 3, 5],
     timezone: TZ,
     channel: "phone",
-  });
+  }).returning({ id: schema.reminders.id });
+  await scheduleNextJob(walkReminder.id);
 
   const random = seededRandom(42);
   const habitRows: (typeof schema.habitEvents.$inferInsert)[] = [];

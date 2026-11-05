@@ -25,4 +25,5 @@ fi
 mkdir -p logs
 echo "Public URL: $URL"
 echo "Server log is also written to logs/realtime-dev.log"
-PUBLIC_BASE_URL="$URL" npx tsx watch realtime-server/index.ts 2>&1 | tee -a logs/realtime-dev.log
+# Running the phone dev server is an explicit choice to let Kindly place calls.
+PUBLIC_BASE_URL="$URL" SCHEDULER_ENABLED=true npx tsx watch realtime-server/index.ts 2>&1 | tee -a logs/realtime-dev.log

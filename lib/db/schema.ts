@@ -79,6 +79,8 @@ export const callJobStatus = pgEnum("call_job_status", [
   "cancelled",
   "skipped",
 ]);
+export const callJobKind = pgEnum("call_job_kind", ["reminder", "on_demand"]);
+export const confirmationStatus = pgEnum("confirmation_status", ["pending", "executed", "expired", "rejected"]);
 export const sessionChannel = pgEnum("session_channel", ["browser", "phone"]);
 export const sessionState = pgEnum("session_state", ["connecting", "active", "ending", "ended"]);
 export const agentName = pgEnum("agent_name", ["natalie", "milo", "sarah", "theo", "iris", "clara"]);
@@ -292,6 +294,7 @@ export const callJobs = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     reminderId: uuid("reminder_id").references(() => reminders.id, { onDelete: "set null" }),
+    kind: callJobKind("kind").notNull().default("reminder"),
     dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
     attempts: smallint("attempts").notNull().default(0),
     status: callJobStatus("status").notNull().default("scheduled"),
@@ -339,6 +342,28 @@ export const agentEvents = pgTable(
     at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("agent_events_user_idx").on(t.userId, t.at)],
+).enableRLS();
+
+// High-impact actions an agent proposes. They run only when confirmed, and at most once.
+export const actionConfirmations = pgTable(
+  "action_confirmations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sessionId: uuid("session_id").references(() => callSessions.id, { onDelete: "cascade" }),
+    proposedBy: agentName("proposed_by").notNull(),
+    // Which service carries it out, e.g. "reminder.reschedule" (Milo's reminder service).
+    kind: text("kind").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    summary: text("summary").notNull(),
+    status: confirmationStatus("status").notNull().default("pending"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    executedAt: timestamp("executed_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("action_confirmations_user_idx").on(t.userId, t.status)],
 ).enableRLS();
 
 // ---------- Wellbeing, planning and reports ----------

@@ -18,6 +18,10 @@ const schema = z.object({
   DEMO_CALL_TO_NUMBER: e164,
   // Guards development-only endpoints such as "call my phone now".
   DEV_ADMIN_TOKEN: z.string().min(24),
+  // The call scheduler only runs when explicitly enabled, so starting a server never dials by surprise.
+  SCHEDULER_ENABLED: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
+  // Service-wide cap on calls placed per hour (cost control).
+  CALLS_MAX_PER_HOUR: z.coerce.number().int().min(1).max(500).default(20),
   // Hard cap on any single outbound call, in seconds (cost control).
   CALL_MAX_DURATION_SECONDS: z.coerce.number().int().min(30).max(1800).default(300),
 });
