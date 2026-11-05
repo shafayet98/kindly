@@ -2,7 +2,8 @@
 // Runs as the seeded demo patient. Usage: pnpm voice:smoke
 import "./load-env";
 import { RealtimeSession } from "@openai/agents/realtime";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { scheduleNextJob } from "@/lib/scheduling/jobs";
 import { db, schema } from "@/lib/db";
 import { runTool } from "@/lib/agents/tools/run";
 import { agentKeyOf, createVoiceAgents, type VoiceAgentKey } from "@/lib/agents/voice-agents";
@@ -74,10 +75,21 @@ async function say(text: string) {
   console.log(`${active.toUpperCase()}: ${lastAssistantText()}`);
 }
 
+const [walk] = await db.select({ id: schema.reminders.id }).from(schema.reminders).where(eq(schema.reminders.userId, user.id));
+
 await session.connect({ apiKey: process.env.OPENAI_API_KEY! });
 await say("Hi Milo, what reminders do I have?");
 await say("Can you put me through to Natalie please?");
-await say("I've been finding it hard to keep up my walks.");
+await say("I've been finding it hard to keep up my walks. I'm too tired in the mornings. Can you move my walk reminder to 5 PM?");
+const timeBeforeYes = (await db.select({ t: schema.reminders.localTime }).from(schema.reminders).where(eq(schema.reminders.id, walk.id)))[0].t;
+await say("Yes, please go ahead.");
+const timeAfterYes = (await db.select({ t: schema.reminders.localTime }).from(schema.reminders).where(eq(schema.reminders.id, walk.id)))[0].t;
+// A second confirmation of the same proposal must not change anything again.
+const confirmation = (await db.select({ id: schema.actionConfirmations.id }).from(schema.actionConfirmations).where(eq(schema.actionConfirmations.sessionId, sessionId)))[0];
+const replay = confirmation
+  ? await runTool({ userId: user.id, sessionId, agent: "natalie", channel: "browser", timezone: user.timezone }, "confirm_action", { confirmation_id: confirmation.id })
+  : null;
+const nextJob = await db.select({ dueAt: schema.callJobs.dueAt }).from(schema.callJobs).where(and(eq(schema.callJobs.reminderId, walk.id), eq(schema.callJobs.status, "scheduled")));
 await say("I'd like to talk to Sarah now.");
 const sarahSawWalks = JSON.stringify(session.history).toLowerCase().includes("keep up my walks");
 await say("Thanks Sarah. Can you put me back to Milo?");
@@ -92,6 +104,27 @@ console.log("handoffs:", handoffs);
 console.log("history pruned at Sarah boundary:", prunedAt !== null);
 console.log("Sarah's context still contained earlier health talk:", sarahSawWalks);
 console.log("stored events:", events.map((event) => event.type).join(", "));
-const ok = toolCalls.includes("milo:get_reminders") && handoffs.includes("milo->natalie") && handoffs.includes("natalie->sarah") && !sarahSawWalks;
+console.log(`walk reminder: before yes ${timeBeforeYes}, after yes ${timeAfterYes}`);
+console.log("replayed confirmation:", replay);
+console.log("scheduled call jobs for the walk:", nextJob.map((job) => job.dueAt.toISOString()));
+
+// Restore the demo reminder.
+await db.update(schema.reminders).set({ localTime: "08:00" }).where(eq(schema.reminders.id, walk.id));
+await scheduleNextJob(walk.id);
+
+const ok =
+  toolCalls.includes("milo:get_reminders") &&
+  toolCalls.includes("natalie:propose_reminder_change") &&
+  toolCalls.includes("natalie:confirm_action") &&
+  timeBeforeYes === "08:00" &&
+  timeAfterYes === "17:00" &&
+  replay !== null &&
+  replay.ok &&
+  "error" in replay.result &&
+  events.some((event) => event.type === "delegation") &&
+  nextJob.length === 1 &&
+  handoffs.includes("milo->natalie") &&
+  handoffs.includes("natalie->sarah") &&
+  !sarahSawWalks;
 console.log(ok ? "SMOKE TEST PASSED" : "SMOKE TEST FAILED");
 process.exit(ok ? 0 : 1);

@@ -34,8 +34,18 @@ Approve or revoke a real clinician account (after they sign up and confirm their
 
 ### Phone calls (development)
 
-1. `pnpm dev:phone` — starts a Cloudflare quick tunnel and the realtime server behind it (requires `cloudflared`).
-2. `pnpm call:me` — places a real test call to `DEMO_CALL_TO_NUMBER`.
+1. `pnpm dev:phone` — starts a Cloudflare quick tunnel and the realtime server behind it (requires `cloudflared`), **with the call scheduler on**. Due reminder calls for users who opted in will be placed.
+2. In the app, **Reminders & calls → Call me now**, or `pnpm call:me` for the demo patient.
+
+The scheduler only runs when `SCHEDULER_ENABLED=true`, so starting the server any other way never dials.
+
+### How scheduled calls work
+
+- Each active phone reminder has exactly one `scheduled` job for its next local occurrence (idempotency key = reminder + occurrence), recomputed whenever the reminder changes.
+- The phone server claims due jobs with `FOR UPDATE SKIP LOCKED`, then re-checks consent, pause, quiet hours, the user's daily limit and a service-wide hourly cap before dialling.
+- Twilio status callbacks (signature-validated) move a job through ringing → in progress → answered / missed / busy / failed. Unanswered reminder calls retry on the same job up to the user's limit, then the next occurrence is scheduled.
+- Late reminder calls (>15 min, e.g. server down) and "call me now" requests older than 2 minutes are skipped, never placed late. A claimed job whose dial state is unknown is failed rather than redialled.
+- Agents change reminders in two steps: propose (stored in `action_confirmations`) and `confirm_action` after the person says yes. A confirmation executes once; Natalie's changes are recorded as delegations to Milo's reminder service.
 
 ## Scripts
 
@@ -44,6 +54,7 @@ Approve or revoke a real clinician account (after they sign up and confirm their
 | `pnpm lint` / `pnpm typecheck` / `pnpm test` | Checks run in CI |
 | `pnpm test:e2e` | Playwright browser tests against the real Supabase project, including a real browser voice call with a fake microphone (needs `.env`; local only; resets demo data first) |
 | `pnpm voice:smoke` | Text-only conversation with the live agents: tools, handoffs, Sarah privacy pruning (real Realtime API, a few cents) |
+| `pnpm scheduler:check` | Runs the call scheduler against the database with a **fake** Twilio client (never dials): consent, races, retries, pause, quiet hours, expiry, errors |
 | `pnpm phone:smoke` | Drives the Twilio media-stream bridge with a simulated Twilio client: forged/replayed tokens rejected, Milo audio returned |
 | `pnpm db:generate` / `pnpm db:migrate` | Create / apply Drizzle migrations |
 
