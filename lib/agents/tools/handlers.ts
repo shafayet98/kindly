@@ -158,12 +158,13 @@ export const handlers: ToolHandlers = {
 
   async propose_plan_adjustment(ctx, input) {
     if (!UUID.test(input.goal_id)) return { error: "Unknown goal. Call get_goals first." };
-    const change: { timesPerWeek?: number; minutes?: number; title?: string } = {};
+    const change: { timesPerWeek?: number; minutes?: number; time?: string; title?: string } = {};
     if (input.times_per_week !== null) change.timesPerWeek = input.times_per_week;
     if (input.minutes !== null) change.minutes = input.minutes;
+    if (input.time !== null) change.time = input.time;
     if (input.new_title !== null) change.title = input.new_title;
     try {
-      const { proposalId, summary } = await createPlanProposal(ctx.userId, input.goal_id, change, `Barrier (patient's words): ${input.barrier_in_their_words}`);
+      const { proposalId, summary } = await createPlanProposal(ctx.userId, input.goal_id, change, `Reason (patient's words): ${input.reason_in_their_words}`);
       const confirmationId = await proposeAction(ctx, { kind: "plan.adjust", payload: { proposalId } }, summary);
       return { confirmation_id: confirmationId, summary, prepared_by: "Theo", next_step: ASK };
     } catch (error) {

@@ -110,14 +110,16 @@ export const TOOL_SPECS = {
   propose_plan_adjustment: spec({
     name: "propose_plan_adjustment",
     description:
-      "Theo's planning service. After the person has told you what got in the way, propose a smaller or easier version of one goal. " +
-      "Nothing changes yet: read the summary and ask them to confirm, then call confirm_action.",
+      "Theo's planning service. Change one of the person's goals: how often, how long, its time (e.g. a bedtime), or its name. " +
+      "Use it when they ask to change a goal, or after a setback once they've said what got in the way. " +
+      "Get the goal id from get_goals. Nothing changes yet: read the summary, ask them to confirm, then call confirm_action.",
     parameters: z.object({
       goal_id: id,
       times_per_week: z.number().int().min(1).max(14).nullable(),
       minutes: z.number().int().min(1).max(240).nullable(),
+      time: time.nullable().describe('The goal\'s time of day, 24-hour, e.g. bedtime 10 PM = "22:00"'),
       new_title: z.string().min(3).max(80).nullable(),
-      barrier_in_their_words: z.string().min(2).max(300),
+      reason_in_their_words: z.string().min(2).max(300),
     }),
     agents: ["natalie", "theo"],
   }),
