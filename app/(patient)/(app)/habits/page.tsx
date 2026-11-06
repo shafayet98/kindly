@@ -6,6 +6,7 @@ import { requireOnboardedPatient } from "@/lib/auth/session";
 import { getConsentState } from "@/lib/consent/store";
 import { db, schema } from "@/lib/db";
 import { recentHabitEvents } from "@/lib/habits/service";
+import { formatTime12h } from "@/lib/scheduling/occurrences";
 import { localDate } from "@/lib/time";
 import { allowHealthData, archiveGoal } from "./actions";
 import { AddGoalForm, CorrectEntryForm, LogCheckInForm } from "./forms";
@@ -57,6 +58,7 @@ export default async function HabitsPage() {
               <p className="text-sm text-muted">
                 {typeof goal.target.timesPerWeek === "number" ? `${goal.target.timesPerWeek} times a week` : "No weekly target"}
                 {typeof goal.target.minutes === "number" ? `, ${goal.target.minutes} minutes` : ""}
+                {typeof goal.target.time === "string" ? ` · by ${formatTime12h(goal.target.time)}` : ""}
                 {goal.planVersion > 1 ? ` · adjusted ${goal.planVersion - 1}×` : ""}
                 {goal.approvedBy ? " · clinician-approved" : ""}
               </p>

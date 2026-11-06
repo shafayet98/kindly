@@ -1,21 +1,14 @@
 import { and, eq } from "drizzle-orm";
 import { audit } from "@/lib/audit";
 import { db, schema } from "@/lib/db";
+import { describePlanChange, retitleForTime, type PlanChange } from "./describe";
+
+export { describePlanChange, retitleForTime, type PlanChange };
 
 // Theo: turns an agreed intention into a concrete goal change. A proposal is stored first and
 // only applied after the person confirms. Clinician-approved plans are never changed here.
 
 export class PlanError extends Error {}
-
-export type PlanChange = { timesPerWeek?: number; minutes?: number; title?: string };
-
-export function describePlanChange(goal: { title: string; target: Record<string, unknown> }, change: PlanChange) {
-  const parts: string[] = [];
-  if (change.title && change.title !== goal.title) parts.push(`rename to “${change.title}”`);
-  if (change.timesPerWeek !== undefined && change.timesPerWeek !== goal.target.timesPerWeek) parts.push(`${goal.target.timesPerWeek ?? "?"} → ${change.timesPerWeek} times a week`);
-  if (change.minutes !== undefined && change.minutes !== goal.target.minutes) parts.push(`${goal.target.minutes ?? "?"} → ${change.minutes} minutes each time`);
-  return parts.length ? parts.join(", ") : "no change";
-}
 
 export async function createPlanProposal(userId: string, goalId: string, change: PlanChange, rationale: string) {
   const [goal] = await db.select().from(schema.goals).where(and(eq(schema.goals.id, goalId), eq(schema.goals.userId, userId)));
@@ -44,9 +37,14 @@ export async function applyPlanProposal(userId: string, proposalId: string) {
     const target = { ...goal.target };
     if (change.timesPerWeek !== undefined) target.timesPerWeek = change.timesPerWeek;
     if (change.minutes !== undefined) target.minutes = change.minutes;
+    let title = change.title ?? goal.title;
+    if (change.time !== undefined) {
+      if (!change.title) title = retitleForTime(title, typeof goal.target.time === "string" ? goal.target.time : undefined, change.time);
+      target.time = change.time;
+    }
     const [updated] = await tx
       .update(schema.goals)
-      .set({ target, title: change.title ?? goal.title, planVersion: goal.planVersion + 1 })
+      .set({ target, title, planVersion: goal.planVersion + 1 })
       .where(eq(schema.goals.id, goal.id))
       .returning();
     await audit({ actorUserId: userId, actorType: "agent", actorLabel: "theo", resourceType: "goal", resourceId: goal.id, action: "plan.adjusted", result: "success", metadata: { proposalId } }, tx);

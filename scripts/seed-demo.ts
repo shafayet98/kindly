@@ -80,7 +80,7 @@ async function main() {
     .insert(schema.goals)
     .values({ userId: ids.alex, type: "activity", title: "Walk three times a week", target: { timesPerWeek: 3, minutes: 20 } })
     .returning({ id: schema.goals.id });
-  await db.insert(schema.goals).values({ userId: ids.alex, type: "sleep", title: "In bed by 10:30 on weeknights", target: { nightsPerWeek: 5 } });
+  await db.insert(schema.goals).values({ userId: ids.alex, type: "sleep", title: "In bed by 10:30 on weeknights", target: { nightsPerWeek: 5, time: "22:30" } });
   const [walkReminder] = await db.insert(schema.reminders).values({
     userId: ids.alex,
     goalId: walkGoal.id,

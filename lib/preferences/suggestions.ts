@@ -15,12 +15,12 @@ const QUICK_ACTIONS: QuickAction[] = [
 
 const LIVE_AGENT_ORDER: AgentKey[] = ["natalie", "milo", "sarah"];
 
-export type GoalSuggestion = { type: "activity" | "nutrition" | "sleep" | "smoking" | "wellbeing"; title: string; target: Record<string, number> };
+export type GoalSuggestion = { type: "activity" | "nutrition" | "sleep" | "smoking" | "wellbeing"; title: string; target: Record<string, number | string> };
 
 const GOAL_SUGGESTIONS: Partial<Record<FocusAreaKey, GoalSuggestion[]>> = {
   health_habits: [
     { type: "activity", title: "Walk three times a week", target: { timesPerWeek: 3, minutes: 20 } },
-    { type: "sleep", title: "In bed by 10:30 on weeknights", target: { nightsPerWeek: 5 } },
+    { type: "sleep", title: "In bed by 10:30 on weeknights", target: { nightsPerWeek: 5, time: "22:30" } },
     { type: "nutrition", title: "Eat vegetables with dinner", target: { daysPerWeek: 5 } },
   ],
   daily_planning: [{ type: "activity", title: "A 10-minute stretch each morning", target: { timesPerWeek: 5, minutes: 10 } }],
