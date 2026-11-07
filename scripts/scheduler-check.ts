@@ -4,7 +4,10 @@ import "./load-env";
 import { eq, sql } from "drizzle-orm";
 import pino from "pino";
 import { db, schema } from "@/lib/db";
-import { queueOnDemandCall } from "@/lib/scheduling/jobs";
+import { queueOnDemandCall, scheduleNextJob } from "@/lib/scheduling/jobs";
+import { localClock } from "@/lib/scheduling/occurrences";
+import { createGoal, postponeSession } from "@/lib/goals/service";
+import { addDays, localDate, zonedTimeToUtc } from "@/lib/time";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createReminder } from "@/lib/reminders/service";
 import { enablePhoneCalls, pauseCalls, resumeCalls } from "@/lib/calls/settings";
@@ -113,6 +116,25 @@ try {
   await runSchedulerOnce(deps);
   const failed = await job(again.id);
   check("Twilio rejection is recorded as failed with its error code", failed.status === "failed" && (failed.lastError ?? "").includes("21219"));
+
+  // 8. Moving one session of a goal moves that day's reminder call, and the regular schedule stays.
+  await noQuietHours();
+  const tz = "Australia/Adelaide";
+  await db.update(schema.users).set({ timezone: tz }).where(eq(schema.users.id, userId));
+  const today = localDate(new Date(), tz);
+  const tomorrow = addDays(today, 1);
+  const goal = await createGoal(userId, { title: "Evening walk", category: "walk", cadence: "daily", targetCount: 1, daysOfWeek: null, times: ["19:00"], durationMinutes: null, notes: null }, { type: "patient" });
+  const { reminder: walkReminder } = await createReminder(userId, { title: "Evening walk", localTime: "19:00", daysOfWeek: [0, 1, 2, 3, 4, 5, 6], channel: "phone", goalId: goal.id }, { type: "patient" });
+  await db.update(schema.callJobs).set({ status: "cancelled" }).where(eq(schema.callJobs.reminderId, walkReminder.id));
+  await scheduleNextJob(walkReminder.id, zonedTimeToUtc(today, "23:59", tz)); // next regular call: tomorrow 19:00
+  await postponeSession(userId, { goalId: goal.id, date: tomorrow, slotTime: "19:00" }, { date: tomorrow, time: "20:30" }, { type: "patient" });
+  const jobs = await db.select().from(schema.callJobs).where(eq(schema.callJobs.reminderId, walkReminder.id));
+  const scheduled = jobs.filter((j) => j.status === "scheduled").map((j) => `${localDate(j.dueAt, tz)} ${localClock(j.dueAt, tz)}${j.idempotencyKey.includes(":moved:") ? " (moved)" : ""}`).sort();
+  check(
+    "moving one session moves that day's reminder call and keeps the next regular one",
+    scheduled.includes(`${tomorrow} 20:30 (moved)`) && !scheduled.includes(`${tomorrow} 19:00`) && scheduled.some((entry) => entry === `${addDays(tomorrow, 1)} 19:00`),
+  );
+  if (!results.at(-1)![1]) console.log("      scheduled jobs:", scheduled);
 } finally {
   await admin.auth.admin.deleteUser(authUserId);
 }

@@ -5,7 +5,7 @@ import { SAFETY_CONTACTS } from "@/lib/safety/contacts";
 
 export const metadata: Metadata = { title: "Feeling unwell" };
 
-// Available to everyone, whether or not they chose this focus area. Non-diagnostic by design.
+// Available to everyone from the home page. Non-diagnostic by design.
 export default async function FeelingUnwellPage() {
   await requireOnboardedPatient();
   const { emergency, healthAdvice } = SAFETY_CONTACTS;

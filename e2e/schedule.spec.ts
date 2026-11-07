@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { appUserId, createConfirmedUser, db, deleteUser, signIn, sql } from "./helpers";
+import { appUserId, completeOnboarding, createConfirmedUser, db, deleteUser, signIn, sql } from "./helpers";
 
 async function alexScheduledJobs() {
   return db.execute<{ due_at: Date }>(
@@ -7,7 +7,7 @@ async function alexScheduledJobs() {
   );
 }
 
-test("moving a reminder in the UI saves once and reschedules its call (AC-03, AC-13)", async ({ page }) => {
+test("moving a reminder in the UI saves once, reschedules its call and moves its goal (AC-03, AC-13)", async ({ page }) => {
   await signIn(page, "demo.patient@example.com");
   await expect(page).toHaveURL(/\/dashboard$/);
   await page.goto("/schedule");
@@ -18,15 +18,20 @@ test("moving a reminder in the UI saves once and reschedules its call (AC-03, AC
   await walk.getByText("Change time or days").click();
   await walk.getByLabel("New time").fill("17:00");
   await walk.getByRole("button", { name: "Save changes" }).click();
-  await expect(walk.getByRole("status")).toHaveText("Moved from 08:00 to 17:00.");
+  // Slow while the database is far away (Seoul); see the README note.
+  await expect(walk.getByRole("status")).toHaveText("Moved from 08:00 to 17:00.", { timeout: 45_000 });
   await expect(walk).toContainText("5:00 PM · Mon, Wed, Fri");
 
   const jobs = await alexScheduledJobs();
   expect(jobs).toHaveLength(1);
   expect(new Intl.DateTimeFormat("en-GB", { timeZone: "Australia/Adelaide", hour: "2-digit", minute: "2-digit" }).format(new Date(jobs[0].due_at))).toBe("17:00");
 
+  // The reminder belongs to the walk goal, so the goal moves too and the calendar agrees.
+  // Past walks keep their old time; from next week they're at 5 PM.
   await page.goto("/dashboard");
-  await expect(page.getByText("Next: Morning walk at 5:00 PM")).toBeVisible();
+  await page.getByRole("link", { name: "Next week" }).click();
+  await expect(page.getByRole("button", { name: /Morning walk.*5:00 PM/ })).toHaveCount(3);
+  await expect(page.getByRole("button", { name: /Morning walk.*8:00 AM/ })).toHaveCount(0);
 });
 
 test("pausing calls cancels pending calls; resuming restores them (AC-11)", async ({ page }) => {
@@ -46,11 +51,7 @@ test("phone calls need an explicit opt-in with a confirmed number (AC-24, AC-30,
   const account = await createConfirmedUser("e2e.calls");
   try {
     await signIn(page, account.email);
-    await page.getByRole("button", { name: "Skip for now" }).click();
-    await expect(page.getByRole("heading", { name: "Want to start with one small goal?" })).toBeVisible();
-    await page.getByRole("button", { name: "Skip for now" }).click();
-    await page.getByRole("button", { name: "Finish and go to my dashboard" }).click();
-    await expect(page).toHaveURL(/\/dashboard$/);
+    await completeOnboarding(page);
 
     await page.goto("/schedule");
     await page.getByText("Add a reminder").click();

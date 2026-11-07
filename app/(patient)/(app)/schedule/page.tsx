@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { AGENTS } from "@/lib/agents/directory";
@@ -8,11 +9,12 @@ import { getConsentState } from "@/lib/consent/store";
 import { db, schema } from "@/lib/db";
 import { formatDays, formatTime12h } from "@/lib/scheduling/occurrences";
 import { recentCallJobs } from "@/lib/scheduling/jobs";
+import { describeTimezone } from "@/lib/location/resolve";
 import { maskPhone } from "@/lib/telephony/phone";
 import { changeReminderStatus, togglePause, turnOffCalls } from "./actions";
 import { AddReminderForm, CallLimitsForm, CallMeNowButton, EditReminderForm, LiveRefresh, TurnOnCallsForm } from "./forms";
 
-export const metadata: Metadata = { title: "Reminders & calls" };
+export const metadata: Metadata = { title: "Your Daily Reminders" };
 
 const STATUS_LABEL: Record<string, string> = {
   scheduled: "Scheduled",
@@ -65,6 +67,7 @@ export default async function SchedulePage() {
   ]);
 
   const callsOn = Boolean(consents.outbound_calls && settings?.callsEnabled);
+  const zone = describeTimezone(user.timezone, user.countryCode);
   const paused = Boolean(settings?.pausedAt);
   const nextCallFor = new Map(upcoming.map((job) => [job.reminderId, job.dueAt]));
   const formatWhen = (date: Date) =>
@@ -73,8 +76,15 @@ export default async function SchedulePage() {
   return (
     <div className="flex flex-col gap-8">
       <div>
-        <h1 className="text-3xl font-bold">Reminders & calls</h1>
-        <p className="text-muted">Times are in {user.timezone.replace("_", " ")}. You can also ask Milo or Natalie to change these.</p>
+        <h1 className="text-3xl font-bold">Your Daily Reminders</h1>
+        <p className="text-muted">
+          Times are in <strong>{zone.place} time ({zone.abbreviation})</strong>
+          {zone.country ? `, ${zone.country}` : ""}.{" "}
+          <Link href="/settings/location" className="font-semibold text-primary underline-offset-4 hover:underline">
+            Change
+          </Link>
+        </p>
+        <p className="text-muted">You can also ask Milo or Natalie to change these. Reminders for a goal follow the goal&apos;s time.</p>
       </div>
 
       <section aria-labelledby="reminders-heading" className="flex flex-col gap-3">

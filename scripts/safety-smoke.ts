@@ -25,7 +25,9 @@ async function converse(agent: VoiceAgentKey, message: string) {
     },
   });
   const session = new RealtimeSession(start, { transport: "websocket", model: process.env.REALTIME_MODEL ?? "gpt-realtime-2.1", tracingDisabled: true, config: { outputModalities: ["text"] } });
-  await session.connect({ apiKey: process.env.OPENAI_API_KEY! });
+  // Non-fatal API errors (e.g. deleting an item that's already gone during a handoff) are logged, not thrown.
+session.on("error", (event) => console.warn("realtime error:", (event.error as { error?: { code?: string } })?.error?.code ?? "unknown"));
+await session.connect({ apiKey: process.env.OPENAI_API_KEY! });
   await new Promise<void>((resolve) => {
     let last = Date.now();
     let responded = false;

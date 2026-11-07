@@ -10,6 +10,7 @@ import {
   type ReminderFields,
 } from "@/lib/reminders/service";
 import { applyPlanProposal, PlanError, rejectPlanProposal } from "@/lib/plans/service";
+import { GoalError, postponeSession } from "@/lib/goals/service";
 import type { ToolContext } from "./tools/types";
 
 const CONFIRMATION_TTL_MS = 10 * 60_000;
@@ -18,7 +19,8 @@ type Action =
   | { kind: "reminder.reschedule"; payload: { reminderId: string; localTime?: string; daysOfWeek?: number[] } }
   | { kind: "reminder.status"; payload: { reminderId: string; status: "active" | "paused" | "cancelled" } }
   | { kind: "reminder.create"; payload: ReminderFields }
-  | { kind: "plan.adjust"; payload: { proposalId: string } };
+  | { kind: "plan.adjust"; payload: { proposalId: string } }
+  | { kind: "session.postpone"; payload: { goalId: string; date: string; slotTime: string; toDate: string; toTime: string | null } };
 
 /** Stores a proposed high-impact action. Nothing changes until it is confirmed. */
 export async function proposeAction(ctx: ToolContext, action: Action, summary: string) {
@@ -71,7 +73,7 @@ export async function executeAction(ctx: ToolContext, confirmationId: string) {
 
   const action = { kind: claimed.kind, payload: claimed.payload } as Action;
   try {
-    const milo = { type: "agent" as const, agent: "milo" as const };
+    const milo = { type: "agent" as const, agent: "milo" as const, sessionId: ctx.sessionId };
     let summary: string;
     let nextDue: Date | null;
     switch (action.kind) {
@@ -93,8 +95,15 @@ export async function executeAction(ctx: ToolContext, confirmationId: string) {
         nextDue = result.nextDue;
         break;
       }
+      case "session.postpone": {
+        const { goalId, date, slotTime, toDate, toTime } = action.payload;
+        await postponeSession(ctx.userId, { goalId, date, slotTime }, { date: toDate, time: toTime }, { type: "agent", agent: "milo", sessionId: ctx.sessionId });
+        summary = `Saved: ${claimed.summary}`;
+        nextDue = null;
+        break;
+      }
       case "plan.adjust": {
-        const result = await applyPlanProposal(ctx.userId, action.payload.proposalId);
+        const result = await applyPlanProposal(ctx.userId, action.payload.proposalId, ctx.sessionId);
         summary = `Saved: ${result.summary}`;
         nextDue = null;
         break;
@@ -106,7 +115,7 @@ export async function executeAction(ctx: ToolContext, confirmationId: string) {
   } catch (error) {
     // Release the claim so the person can try again; nothing was saved.
     await db.update(schema.actionConfirmations).set({ status: "pending", executedAt: null }).where(eq(schema.actionConfirmations.id, confirmationId));
-    if (error instanceof ReminderError || error instanceof PlanError) return { ok: false as const, error: error.message };
+    if (error instanceof ReminderError || error instanceof PlanError || error instanceof GoalError) return { ok: false as const, error: error.message };
     throw error;
   }
 }

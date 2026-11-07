@@ -5,6 +5,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { runTool } from "@/lib/agents/tools/run";
 import { agentKeyOf, createVoiceAgents, REALTIME_VOICE, type CallOpening, type VoiceAgentKey } from "@/lib/agents/voice-agents";
 import { createCallSession, endCallSession, MAX_SESSION_MINUTES, recordHandoff } from "./sessions";
+import { summarizeConversation, type TranscriptSegment } from "@/lib/conversations/summary";
 import { crossesPrivacyBoundary, pruneForHandoff } from "./privacy";
 
 /** What a valid stream token proves: which call this is and whose it is. */
@@ -38,6 +39,7 @@ export function handleTwilioMediaStream(socket: WebSocket, { apiKey, model, log,
   let sessionId: string | null = null;
   let started = false;
   const openedAt = Date.now();
+  const transcript = new Map<string, TranscriptSegment>();
 
   const startTimer = setTimeout(() => {
     if (!started) {
@@ -91,9 +93,20 @@ export function handleTwilioMediaStream(socket: WebSocket, { apiKey, model, log,
         transport,
         model,
         tracingDisabled: true,
-        config: { audio: { output: { voice: REALTIME_VOICE } } },
+        config: { audio: { input: { transcription: { model: "gpt-4o-mini-transcribe" } }, output: { voice: REALTIME_VOICE } } },
       });
       const liveSession = session;
+
+      // Kept in memory for this call only, to write a summary at the end if the person wants one.
+      liveSession.on("history_updated", (history) => {
+        for (const item of history) {
+          if (item.type !== "message" || item.role === "system") continue;
+          const text = item.content.map((part) => ("transcript" in part && part.transcript) || ("text" in part && part.text) || "").join(" ").trim();
+          if (!text) continue;
+          const known = transcript.get(item.itemId);
+          transcript.set(item.itemId, { agent: known?.agent ?? activeAgent, role: item.role, text: text.slice(0, 2000) });
+        }
+      });
 
       liveSession.on("agent_handoff", (_context, fromAgent, toAgent) => {
         const from = agentKeyOf(fromAgent);
@@ -130,7 +143,13 @@ export function handleTwilioMediaStream(socket: WebSocket, { apiKey, model, log,
       // Already closed by the transport.
     }
     if (sessionId && call) {
-      void endCallSession(sessionId, call.userId).catch(() => undefined);
+      const { userId } = call;
+      const endedSession = sessionId;
+      const segments = [...transcript.values()].slice(-400);
+      transcript.clear();
+      void endCallSession(endedSession, userId)
+        .then(() => (segments.length ? summarizeConversation(userId, endedSession, segments) : null))
+        .catch(() => undefined);
     }
     log.info({ callSid: call?.callSid ?? null, seconds: Math.round((Date.now() - openedAt) / 1000) }, "media stream closed");
   });

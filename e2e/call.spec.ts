@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { appUserId, createConfirmedUser, db, deleteUser, signIn, sql } from "./helpers";
+import { appUserId, completeOnboarding, createConfirmedUser, db, deleteUser, signIn, sql } from "./helpers";
 
 test("browser call: agent speaks, UI switch keeps the same session, end call is recorded (AC-01, AC-02, AC-05)", async ({ page }) => {
   await signIn(page, "demo.patient@example.com");
@@ -66,11 +66,7 @@ test.describe("voice API security", () => {
     const account = await createConfirmedUser("e2e.voiceconsent");
     try {
       await signIn(page, account.email);
-      await page.getByRole("button", { name: "Skip for now" }).click();
-      await expect(page.getByRole("heading", { name: "Want to start with one small goal?" })).toBeVisible();
-      await page.getByRole("button", { name: "Skip for now" }).click();
-      await page.getByRole("button", { name: "Finish and go to my dashboard" }).click();
-      await expect(page).toHaveURL(/\/dashboard$/);
+      await completeOnboarding(page);
 
       const denied = await page.request.post("/api/voice/session", { data: { agent: "natalie" }, headers: { Origin: baseURL! } });
       expect(denied.status()).toBe(403);

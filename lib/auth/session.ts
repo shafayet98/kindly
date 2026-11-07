@@ -16,6 +16,7 @@ export type CurrentUser = {
   isApprovedClinician: boolean;
   displayName: string | null;
   timezone: string;
+  countryCode: string | null;
   onboardingStep: string | null;
   onboardingCompletedAt: Date | null;
 };
@@ -34,6 +35,7 @@ async function loadAppUser(authUserId: string) {
       role: schema.users.role,
       displayName: schema.users.displayName,
       timezone: schema.users.timezone,
+      countryCode: schema.users.countryCode,
       onboardingStep: schema.patientProfiles.onboardingStep,
       onboardingCompletedAt: schema.patientProfiles.onboardingCompletedAt,
       isApprovedClinician: isApprovedClinicianSql,

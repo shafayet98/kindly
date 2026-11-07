@@ -3,7 +3,7 @@ import { ButtonLink } from "@/components/ui/button";
 import { AGENTS } from "@/lib/agents/directory";
 
 const STEPS = [
-  { title: "Choose what matters", body: "Pick one or more areas, like healthy habits, routines or how you're feeling. Change them any time." },
+  { title: "Set small goals", body: "Say it in your own words, like “walk 3 days a week”. Kindly sorts it and puts it on your weekly calendar." },
   { title: "Talk, don't type", body: "Speak naturally. Ask for Natalie, Milo or Sarah and they'll pass the conversation along without hanging up." },
   { title: "Real actions, your permission", body: "Companions move reminders and adjust plans only after you say yes. Nothing is shared unless you choose." },
 ];

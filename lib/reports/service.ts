@@ -15,8 +15,8 @@ export { REPORT_SCOPES, type ReportScope };
 export type ReportContent = {
   generatedBy: "clara";
   period: Insights["period"];
-  sections: { scope: ReportScope; title: string; statements: { text: string; sources: string[]; kind: "observation" | "hypothesis" | "system" }[] }[];
-  missingData: Insights["missingData"];
+  sections: { scope: ReportScope; title: string; statements: { text: string; sources: string[]; basis?: string; kind: "observation" | "hypothesis" | "system" }[] }[];
+  missingData: { text: string; sources: string[] }[];
   excluded: string[];
 };
 
@@ -25,7 +25,7 @@ export class ReportError extends Error {}
 export function buildReportContent(insights: Insights, scopes: ReportScope[]): ReportContent {
   const sections: ReportContent["sections"] = [];
   if (scopes.includes("goals")) {
-    sections.push({ scope: "goals", title: "Goals", statements: insights.goals.map((goal) => ({ ...goal.statement, kind: "observation" })) });
+    sections.push({ scope: "goals", title: "Goals", statements: insights.goalStatements.map((s) => ({ ...s, kind: "observation" })) });
   }
   if (scopes.includes("checkins")) {
     sections.push({ scope: "checkins", title: "Patient-reported check-ins", statements: insights.observations.map((s) => ({ ...s, kind: "observation" })) });
@@ -34,20 +34,20 @@ export function buildReportContent(insights: Insights, scopes: ReportScope[]): R
     sections.push({ scope: "patterns", title: "Patterns to discuss (hypotheses, not conclusions)", statements: insights.hypotheses.map((s) => ({ ...s, kind: "hypothesis" })) });
   }
   if (scopes.includes("plan_changes")) {
-    sections.push({ scope: "plan_changes", title: "Plan changes approved by the patient", statements: insights.planChanges.map((s) => ({ ...s, kind: "system" })) });
+    sections.push({ scope: "plan_changes", title: "Plan changes approved by the patient", statements: insights.planChanges.map((s) => ({ text: s.quote ? `${s.text} Reason given: “${s.quote}”` : s.text, sources: s.sources, basis: s.basis, kind: "system" })) });
   }
   return {
     generatedBy: "clara",
     period: insights.period,
     sections,
-    missingData: insights.missingData,
-    excluded: ["Private wellbeing conversations and notes", "Call recordings and transcripts (never stored)", ...Object.keys(REPORT_SCOPES).filter((s) => !scopes.includes(s as ReportScope)).map((s) => REPORT_SCOPES[s as ReportScope])],
+    missingData: [{ text: "Sessions not marked done are counted as not done; some may have happened without being recorded.", sources: [] }],
+    excluded: ["Private wellbeing conversations and notes", "Conversation summaries", "Call recordings and transcripts (never stored)", ...Object.keys(REPORT_SCOPES).filter((s) => !scopes.includes(s as ReportScope)).map((s) => REPORT_SCOPES[s as ReportScope])],
   };
 }
 
 export async function createReport(userId: string, timezone: string, weeks: number, scopes: ReportScope[]) {
   if (scopes.length === 0) throw new ReportError("Choose at least one thing to include.");
-  const insights = await loadInsights(userId, timezone, weeks);
+  const insights = await loadInsights(userId, timezone, weeks, "clinician");
   const content = buildReportContent(insights, scopes);
   const [report] = await db
     .insert(schema.reports)

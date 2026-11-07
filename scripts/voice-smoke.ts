@@ -3,8 +3,8 @@
 import "./load-env";
 import { RealtimeSession } from "@openai/agents/realtime";
 import { and, eq } from "drizzle-orm";
-import { scheduleNextJob } from "@/lib/scheduling/jobs";
 import { db, schema } from "@/lib/db";
+import { localClock } from "@/lib/scheduling/occurrences";
 import { runTool } from "@/lib/agents/tools/run";
 import { agentKeyOf, createVoiceAgents, type VoiceAgentKey } from "@/lib/agents/voice-agents";
 import { createCallSession, endCallSession, recordHandoff } from "@/lib/voice/sessions";
@@ -47,18 +47,41 @@ session.on("agent_handoff", (_ctx, from, to) => {
   void recordHandoff(sessionId, user.id, fromKey, toKey, "voice");
 });
 
+// Waits until the assistant has responded and nothing (speech or tool calls) has happened for a while.
 function waitForTurn() {
-  return new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("timed out waiting for a response")), 30_000);
-    const onDone = () => {
-      // A handoff or tool call produces more than one response; wait until things go quiet.
-      clearTimeout(timer);
-      setTimeout(() => {
-        session.transport.off("turn_done", onDone);
-        resolve();
-      }, 2500);
+  return new Promise<void>((resolve) => {
+    let last = Date.now();
+    let responded = false;
+    const touch = () => (last = Date.now());
+    const done = () => {
+      responded = true;
+      touch();
     };
-    session.transport.on("turn_done", onDone);
+    session.transport.on("turn_started", touch);
+    session.transport.on("turn_done", done);
+    // A tool still running (slow database round trips) means the turn isn't over.
+    let running = 0;
+    const toolStart = () => {
+      running++;
+      touch();
+    };
+    const toolEnd = () => {
+      running = Math.max(0, running - 1);
+      touch();
+    };
+    session.on("agent_tool_start", toolStart);
+    session.on("agent_tool_end", toolEnd);
+    const started = Date.now();
+    const poll = setInterval(() => {
+      if ((responded && running === 0 && Date.now() - last > 4000) || Date.now() - started > 60_000) {
+        clearInterval(poll);
+        session.transport.off("turn_started", touch);
+        session.transport.off("turn_done", done);
+        session.off("agent_tool_start", toolStart);
+        session.off("agent_tool_end", toolEnd);
+        resolve();
+      }
+    }, 250);
   });
 }
 
@@ -75,8 +98,13 @@ async function say(text: string) {
   console.log(`${active.toUpperCase()}: ${lastAssistantText()}`);
 }
 
-const [walk] = await db.select({ id: schema.reminders.id }).from(schema.reminders).where(eq(schema.reminders.userId, user.id));
+const [walk] = await db
+  .select({ id: schema.reminders.id })
+  .from(schema.reminders)
+  .where(and(eq(schema.reminders.userId, user.id), eq(schema.reminders.title, "Morning walk")));
 
+// Non-fatal API errors (e.g. deleting an item that's already gone during a handoff) are logged, not thrown.
+session.on("error", (event) => console.warn("realtime error:", (event.error as { error?: { code?: string } })?.error?.code ?? "unknown"));
 await session.connect({ apiKey: process.env.OPENAI_API_KEY! });
 await say("Hi Milo, what reminders do I have?");
 await say("Can you put me through to Natalie please?");
@@ -108,9 +136,9 @@ console.log(`walk reminder: before yes ${timeBeforeYes}, after yes ${timeAfterYe
 console.log("replayed confirmation:", replay);
 console.log("scheduled call jobs for the walk:", nextJob.map((job) => job.dueAt.toISOString()));
 
-// Restore the demo reminder.
-await db.update(schema.reminders).set({ localTime: "08:00" }).where(eq(schema.reminders.id, walk.id));
-await scheduleNextJob(walk.id);
+const walkGoals = await db.select().from(schema.goals).where(and(eq(schema.goals.userId, user.id), eq(schema.goals.category, "walk")));
+console.log("walk goal now:", walkGoals.filter((goal) => goal.endsOn === null).map((goal) => goal.times));
+console.log("(run pnpm demo:reset to restore the demo data)");
 
 const ok =
   toolCalls.includes("milo:get_reminders") &&
@@ -123,6 +151,8 @@ const ok =
   "error" in replay.result &&
   events.some((event) => event.type === "delegation") &&
   nextJob.length === 1 &&
+  localClock(nextJob[0].dueAt, user.timezone) === "17:00" &&
+  walkGoals.some((goal) => goal.times[0] === "17:00" && goal.endsOn === null) &&
   handoffs.includes("milo->natalie") &&
   handoffs.includes("natalie->sarah") &&
   !sarahSawWalks;

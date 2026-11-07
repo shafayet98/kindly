@@ -22,6 +22,20 @@
       "when": 1793885400427,
       "tag": "0002_fix_delete_cascades",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794014078639,
+      "tag": "0003_goals_calendar_add",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794015311872,
+      "tag": "0004_goals_calendar_cleanup",
+      "breakpoints": true
     }
   ]
 }

@@ -5,7 +5,8 @@ import { requireOnboardedPatient } from "@/lib/auth/session";
 import { getConsentState } from "@/lib/consent/store";
 import { exportUserData } from "@/lib/privacy/export";
 import { listWellbeingNotes, NOTE_RETENTION_DAYS } from "@/lib/wellbeing/notes";
-import { removeNote, toggleConsent } from "./actions";
+import { summaryPreferences } from "@/lib/conversations/summary";
+import { removeNote, toggleConsent, toggleSarahInSummaries } from "./actions";
 import { DeleteAccountForm } from "./delete-form";
 
 export const metadata: Metadata = { title: "Privacy & data" };
@@ -14,11 +15,12 @@ const PERMISSIONS = [
   { purpose: "health_data_processing", title: "Save my habit check-ins", detail: "Activity, food, sleep, smoking and mood you report." },
   { purpose: "browser_voice", title: "Browser voice calls", detail: "Microphone use during Talk now. Audio isn't recorded." },
   { purpose: "sensitive_wellbeing", title: "Private notes with Sarah", detail: `Sarah can keep short notes you ask for, for ${NOTE_RETENTION_DAYS} days. Never shared.` },
+  { purpose: "conversation_summaries", title: "Conversation summaries", detail: "A short AI summary of each call, only for you. The words themselves are never stored." },
 ] as const;
 
 export default async function PrivacyPage() {
   const user = await requireOnboardedPatient();
-  const [consents, notes, data] = await Promise.all([getConsentState(user.id), listWellbeingNotes(user.id), exportUserData(user.id)]);
+  const [consents, notes, data, summaryPrefs] = await Promise.all([getConsentState(user.id), listWellbeingNotes(user.id), exportUserData(user.id), summaryPreferences(user.id)]);
   const when = (date: Date) => new Intl.DateTimeFormat("en-AU", { dateStyle: "medium", timeZone: user.timezone }).format(date);
   const activeShares = data.reportShares.filter((share) => !share.revokedAt).length;
 
@@ -26,7 +28,7 @@ export default async function PrivacyPage() {
     <div className="mx-auto flex max-w-3xl flex-col gap-8">
       <div>
         <h1 className="text-3xl font-bold">Privacy & data</h1>
-        <p className="text-muted">Each permission is separate. Choosing focus areas or talking to a companion never turns any of these on.</p>
+        <p className="text-muted">Each permission is separate. Adding goals or talking to a companion never turns any of these on.</p>
       </div>
 
       <section aria-labelledby="perm-heading" className="flex flex-col gap-3">
@@ -52,6 +54,20 @@ export default async function PrivacyPage() {
               </li>
             );
           })}
+          {consents.conversation_summaries && (
+            <li className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-surface p-4">
+              <span>
+                <span className="block font-bold">Include chats with Sarah in summaries</span>
+                <span className="block text-sm text-muted">
+                  {summaryPrefs.includeSarah ? "On: summaries cover the whole call." : "Off: summaries only say you had a private chat with Sarah."}
+                </span>
+              </span>
+              <form action={toggleSarahInSummaries}>
+                <input type="hidden" name="include" value={summaryPrefs.includeSarah ? "false" : "true"} />
+                <SubmitButton variant="secondary">{summaryPrefs.includeSarah ? "On · turn off" : "Off · turn on"}</SubmitButton>
+              </form>
+            </li>
+          )}
           <li className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-surface p-4">
             <span>
               <span className="block font-bold">Phone calls</span>
@@ -110,6 +126,8 @@ export default async function PrivacyPage() {
             [data.goals.length, "goals"],
             [data.reminders.length, "reminders"],
             [data.callSessions.length, "call records (who spoke and when, no audio or words)"],
+            [data.conversationSummaries.length, "conversation summaries"],
+            [data.goalSessions.length, "goal sessions marked done or moved"],
             [data.reports.length, "reports"],
             [data.wellbeingNotes.length, "private notes"],
           ].map(([count, label]) => (
