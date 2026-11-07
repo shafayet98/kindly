@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { and, eq } from "drizzle-orm";
+import { Chip, Icon, PageHead, PersonAvatar } from "@/components/kindly/parts";
 import { requireApprovedClinician } from "@/lib/auth/session";
 import { db, schema } from "@/lib/db";
 import { sharedReportsForClinician } from "@/lib/reports/service";
@@ -21,22 +22,31 @@ export default async function ClinicianPatientsPage() {
   ]);
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-3xl font-bold">Your patients</h1>
-        <p className="text-muted">Fictional demonstration data. You see only what each patient has chosen to share.</p>
-      </div>
+    <>
+      <PageHead title="Your patients" sub="Fictional demonstration data. You see only what each patient has chosen to share." />
       {patients.length ? (
-        <ul className="grid gap-3 sm:grid-cols-2">
+        <ul className="grid-2">
           {patients.map((patient) => {
             const reports = shared.filter((report) => report.patientId === patient.id);
             const unreviewed = reports.filter((report) => !report.reviewedAt).length;
+            const name = patient.displayName ?? "Patient";
             return (
               <li key={patient.id}>
-                <Link href={`/clinician/patients/${patient.id}`} className="flex flex-col rounded-2xl border border-border bg-surface p-4 hover:border-primary">
-                  <span className="font-bold">{patient.displayName ?? "Patient"}</span>
-                  <span className="text-sm text-muted">
-                    {reports.length ? `${reports.length} shared report${reports.length > 1 ? "s" : ""}${unreviewed ? ` · ${unreviewed} to review` : ""}` : "Nothing shared yet"}
+                <Link className="list-card" href={`/clinician/patients/${patient.id}`} style={{ padding: 24 }}>
+                  <PersonAvatar name={name} size="lg" />
+                  <span>
+                    <span className="title" style={{ display: "block" }}>
+                      {name}
+                    </span>
+                    <span className="muted">{reports.length ? `${reports.length} shared report${reports.length > 1 ? "s" : ""}` : "Nothing shared yet"}</span>
+                  </span>
+                  <span className="row" style={{ gap: 10 }}>
+                    {unreviewed > 0 && (
+                      <Chip tone="live" icon="clock">
+                        {unreviewed} to review
+                      </Chip>
+                    )}
+                    <Icon name="chev-right" />
                   </span>
                 </Link>
               </li>
@@ -44,8 +54,8 @@ export default async function ClinicianPatientsPage() {
           })}
         </ul>
       ) : (
-        <p className="rounded-2xl border border-border bg-surface p-4 text-muted">No patients are linked to your account yet.</p>
+        <p className="card muted">No patients are linked to your account yet.</p>
       )}
-    </div>
+    </>
   );
 }

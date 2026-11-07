@@ -44,7 +44,7 @@ export async function completeOnboarding(page: Page, options: { nickname?: strin
   await expect(page.getByRole("heading", { name: "Where are you?" })).toBeVisible();
   await page.getByRole("button", { name: /use this device's timezone/ }).click();
   await expect(page.getByRole("heading", { name: "Your privacy choices" })).toBeVisible();
-  for (const label of options.consents ?? []) await page.getByLabel(label).check();
+  for (const label of options.consents ?? []) await page.getByLabel(label).check({ force: true });
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Want to start with one small goal?" })).toBeVisible();
   await page.getByRole("button", { name: "Finish and go to my dashboard" }).click();

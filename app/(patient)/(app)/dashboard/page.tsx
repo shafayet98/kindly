@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { AddGoal } from "@/components/goals/add-goal";
-import { WeekCalendar } from "@/components/goals/week-calendar";
+import { WeekCalendar, WeekNav, WeekRange } from "@/components/goals/week-calendar";
+import { AiTag, Avatar, Icon, PanelSummary } from "@/components/kindly/parts";
+import { ButtonLink } from "@/components/ui/button";
 import { AGENTS } from "@/lib/agents/directory";
 import { requireOnboardedPatient } from "@/lib/auth/session";
 import { getCallSettings } from "@/lib/calls/settings";
@@ -27,77 +29,140 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
   ]);
   const name = profile[0]?.nickname ?? user.displayName;
   const phoneCallsOn = Boolean(consents.outbound_calls && calls?.callsEnabled);
+  const todayLabel = new Intl.DateTimeFormat("en-AU", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" }).format(new Date(`${calendar.today}T00:00:00Z`));
+  const showWeek = anyGoals || calendar.items.length > 0;
 
   return (
-    <div className="flex flex-col gap-8">
-      <h1 className="text-3xl font-bold">{name ? `Hi ${name}` : "Hi there"}. How can we help today?</h1>
+    <div className="stack-48">
+      <div className="stack" style={{ gap: 8 }}>
+        <p className="label">{todayLabel}</p>
+        <h1 className="headline">{name ? `Hi ${name}` : "Hi there"}. How can we help today?</h1>
+      </div>
 
-      <section aria-label="Main actions" className="grid gap-4 sm:grid-cols-2">
-        <MainAction href="/call?agent=natalie" title="Talk now" detail="Start with Natalie, or ask for anyone" primary />
-        <MainAction href="/progress" title="Progress" detail="See what you've done, week by week" />
-      </section>
-
-      <section aria-labelledby="week-heading" className="flex flex-col gap-3 rounded-3xl border border-border bg-surface p-4 sm:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 id="week-heading" className="text-xl font-bold">
-            Your week
-          </h2>
-          <Link href="/goals" className="font-semibold text-primary underline-offset-4 hover:underline">
-            Manage goals
-          </Link>
-        </div>
-        {anyGoals || calendar.items.length > 0 ? (
-          <WeekCalendar {...calendar} />
-        ) : (
-          <p className="text-muted">No goals yet. Add one below, or just tell Natalie what you&apos;d like to do.</p>
-        )}
-        <details className="rounded-2xl border border-dashed border-border p-4" open={!anyGoals}>
-          <summary className="cursor-pointer font-bold text-primary">Add a goal</summary>
-          <div className="mt-3">
-            <AddGoal phoneCallsOn={phoneCallsOn} />
+      <section aria-label="Main actions" className="grid gap-6 lg:grid-cols-[2fr_1fr]">
+        <Link className="talk-card" href="/call?agent=natalie">
+          <div>
+            <p className="headline" style={{ fontSize: 48 }}>
+              Talk now
+            </p>
+            <p className="body-lg" style={{ marginTop: 8 }}>
+              Start with Natalie, or ask for anyone
+            </p>
+            <div className="talk-card__faces" aria-hidden="true">
+              <Avatar agent="natalie" size="sm" />
+              <Avatar agent="milo" size="sm" />
+              <Avatar agent="sarah" size="sm" />
+            </div>
           </div>
-        </details>
+          <span className="talk-card__mic" aria-hidden="true">
+            <Icon name="mic" className="icon--xl" />
+          </span>
+        </Link>
+        <Link className="prog-card" href="/progress">
+          <span className="cat-icon">
+            <Icon name="chart" />
+          </span>
+          <div>
+            <p className="subhead">Progress</p>
+            <p className="muted" style={{ marginTop: 6 }}>
+              See what you&apos;ve done, week by week
+            </p>
+          </div>
+          <span className="arrow-link">
+            Open progress <Icon name="arrow-right" className="icon--sm" />
+          </span>
+        </Link>
       </section>
 
-      <section aria-labelledby="companions-heading" className="flex flex-col gap-3">
-        <h2 id="companions-heading" className="text-xl font-bold">
-          Your companions
-        </h2>
-        <ul className="grid gap-3 sm:grid-cols-3">
-          {COMPANIONS.map((key) => (
-            <li key={key}>
-              <Link href={`/call?agent=${key}`} className="flex h-full flex-col gap-1 rounded-2xl border border-border bg-surface p-4 hover:border-primary hover:bg-primary-soft">
-                <span className="font-bold">
-                  {AGENTS[key].name} <span className="font-normal text-muted">· {AGENTS[key].role}</span>
-                </span>
-                <span className="text-sm text-muted">{AGENTS[key].helpsWith}</span>
+      <div className="grid items-start gap-10 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <section className="stack-24" aria-labelledby="week-h">
+          <div className="section-head" style={{ margin: 0, alignItems: "center", flexWrap: "wrap" }}>
+            <div>
+              <h2 id="week-h" className="subhead">
+                Your week
+              </h2>
+              {showWeek && <WeekRange weekStart={calendar.weekStart} />}
+            </div>
+            <div className="row" style={{ gap: 16 }}>
+              {showWeek && <WeekNav prevHref={calendar.prevHref} nextHref={calendar.nextHref} thisWeekHref={calendar.thisWeekHref} />}
+              <Link className="link" href="/goals">
+                Manage goals
               </Link>
-            </li>
-          ))}
-        </ul>
-        <div className="flex flex-wrap gap-x-4 gap-y-1">
-          <Link href="/agents" className="font-semibold text-primary underline-offset-4 hover:underline">
-            Meet the whole team
-          </Link>
-          <Link href="/check-in/unwell" className="font-semibold text-primary underline-offset-4 hover:underline">
-            Feeling unwell?
-          </Link>
-        </div>
-      </section>
-    </div>
-  );
-}
+            </div>
+          </div>
+          {showWeek ? (
+            <WeekCalendar
+              weekStart={calendar.weekStart}
+              today={calendar.today}
+              items={calendar.items}
+              counted={calendar.counted}
+              reminders={calendar.reminders}
+              goalInfo={calendar.goalInfo}
+            />
+          ) : (
+            <div className="empty">
+              <span className="empty__art">
+                <Icon name="calendar" className="icon--xl" />
+              </span>
+              <p className="title">No goals yet</p>
+              <p className="muted" style={{ maxWidth: 440 }}>
+                Add one below, or just tell Natalie what you&apos;d like to do. It&apos;ll show up here, day by day.
+              </p>
+              <ButtonLink variant="ghost" href="/call?agent=natalie">
+                <Icon name="mic" className="icon--sm" />
+                Tell Natalie instead
+              </ButtonLink>
+            </div>
+          )}
+          <details className="panel" open={!anyGoals}>
+            <PanelSummary icon="plus" accent>
+              Add a goal
+            </PanelSummary>
+            <div className="panel__body">
+              <AddGoal phoneCallsOn={phoneCallsOn} idPrefix="home" />
+            </div>
+          </details>
+        </section>
 
-function MainAction({ href, title, detail, primary = false }: { href: string; title: string; detail: string; primary?: boolean }) {
-  return (
-    <Link
-      href={href}
-      className={`flex min-h-28 flex-col justify-between rounded-3xl p-5 shadow-sm transition-colors ${
-        primary ? "bg-primary text-white hover:bg-primary-hover" : "border border-border bg-surface hover:border-primary hover:bg-primary-soft"
-      }`}
-    >
-      <span className="text-2xl font-extrabold">{title}</span>
-      <span className={primary ? "text-white/90" : "text-muted"}>{detail}</span>
-    </Link>
+        <aside className="stack-24" aria-labelledby="comp-h">
+          <h2 id="comp-h" className="subhead">
+            Your companions
+          </h2>
+          <ul className="stack">
+            {COMPANIONS.map((key) => (
+              <li key={key} className="card companion-card" style={{ padding: 20 }}>
+                <div className="companion">
+                  <Avatar agent={key} />
+                  <div>
+                    <p className="companion__name">
+                      {AGENTS[key].name} <AiTag />
+                    </p>
+                    <p className="companion__role">{AGENTS[key].role}</p>
+                  </div>
+                </div>
+                <p className="muted small">{AGENTS[key].helpsWith}</p>
+                <ButtonLink variant="ghost" size="sm" href={`/call?agent=${key}`} style={{ alignSelf: "flex-start" }}>
+                  <Icon name="mic" className="icon--sm" />
+                  Talk to {AGENTS[key].name}
+                </ButtonLink>
+              </li>
+            ))}
+          </ul>
+          <Link className="card row nowrap" href="/agents" style={{ textDecoration: "none", padding: "16px 20px" }}>
+            <Icon name="users" />
+            <span style={{ fontWeight: 500 }}>Meet the whole team</span>
+            <Icon name="chev-right" className="icon--sm" />
+          </Link>
+          <Link className="card card--soft row nowrap" href="/check-in/unwell" style={{ textDecoration: "none", padding: "16px 20px" }}>
+            <Icon name="heart" />
+            <span>
+              <span style={{ fontWeight: 500, display: "block" }}>Feeling unwell?</span>
+              <span className="small muted">What to do and where to get help</span>
+            </span>
+            <Icon name="chev-right" className="icon--sm" />
+          </Link>
+        </aside>
+      </div>
+    </div>
   );
 }

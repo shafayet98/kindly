@@ -1,32 +1,33 @@
-import Link from "next/link";
-import { Wordmark } from "@/components/brand";
 import { signOut } from "@/app/(auth)/actions";
+import { Brand, Icon } from "@/components/kindly/parts";
+import { ButtonLink } from "@/components/ui/button";
+import { NavLinks } from "./nav-links";
 
 const NAV = [
   { href: "/dashboard", label: "Home" },
   { href: "/goals", label: "Goals" },
   { href: "/schedule", label: "Reminders" },
   { href: "/progress", label: "Progress" },
-  { href: "/settings", label: "Settings" },
-] as const;
+  { href: "/settings", label: "Settings", match: ["/settings", "/activity", "/care-sharing"] },
+];
 
 export function AppHeader() {
   return (
-    <header className="border-b border-border bg-surface">
-      <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-        <Wordmark href="/dashboard" />
-        <nav aria-label="Main" className="order-3 flex w-full gap-1 overflow-x-auto sm:order-2 sm:w-auto">
-          {NAV.map((item) => (
-            <Link key={item.href} href={item.href} className="rounded-full px-3 py-2 font-semibold text-muted hover:bg-primary-soft hover:text-primary">
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-        <form action={signOut} className="order-2 sm:order-3">
-          <button type="submit" className="rounded-full px-3 py-2 font-semibold text-muted hover:bg-primary-soft hover:text-primary">
-            Sign out
-          </button>
-        </form>
+    <header className="header">
+      <div className="wrap header__inner">
+        <Brand href="/dashboard" />
+        <NavLinks items={NAV} />
+        <div className="header__end">
+          <ButtonLink variant="highlight" size="sm" href="/call">
+            <Icon name="mic" className="icon--sm" />
+            Talk now
+          </ButtonLink>
+          <form action={signOut}>
+            <button type="submit" className="btn btn--link">
+              Sign out
+            </button>
+          </form>
+        </div>
       </div>
     </header>
   );

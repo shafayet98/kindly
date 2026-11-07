@@ -64,7 +64,8 @@ export async function loadCalendar(userId: string, timezone: string, weekStart: 
     goalInfo,
     prevHref: `?week=${addDays(weekStart, -7)}`,
     nextHref: `?week=${addDays(weekStart, 7)}`,
-    thisWeekHref: weekStart === thisWeek ? null : "?",
+    thisWeekHref: "?week=",
+    isThisWeek: weekStart === thisWeek,
   };
 }
 

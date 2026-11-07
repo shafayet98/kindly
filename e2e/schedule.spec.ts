@@ -39,11 +39,11 @@ test("pausing calls cancels pending calls; resuming restores them (AC-11)", asyn
   await expect(page).toHaveURL(/\/dashboard$/);
   await page.goto("/schedule");
   await page.getByRole("button", { name: "Pause all calls" }).click();
-  await expect(page.getByText("All calls are paused.")).toBeVisible();
+  await expect(page.getByText("all calls are paused")).toBeVisible();
   expect(await alexScheduledJobs()).toHaveLength(0);
 
   await page.getByRole("button", { name: "Resume calls" }).click();
-  await expect(page.getByText("Calls are on.")).toBeVisible();
+  await expect(page.getByText("Calls are on", { exact: true })).toBeVisible();
   expect(await alexScheduledJobs()).toHaveLength(1);
 });
 
@@ -55,16 +55,18 @@ test("phone calls need an explicit opt-in with a confirmed number (AC-24, AC-30,
 
     await page.goto("/schedule");
     await page.getByText("Add a reminder").click();
-    await expect(page.getByLabel("A phone call from Milo")).toBeDisabled();
+    // Phone reminders can't be chosen until calls are on.
+    await expect(page.getByRole("radio", { name: /A phone call from Milo/ })).toHaveCount(0);
+    await expect(page.getByText("Turn on phone calls first.")).toBeVisible();
 
     await page.getByLabel("Your mobile number").fill("0400 000 002");
     await page.getByRole("button", { name: "Turn on phone calls" }).click();
-    await expect(page.getByText("Please confirm this is your number")).toBeVisible();
+    await expect(page.getByText(/confirm this is your number/)).toBeVisible();
 
     await expect(page.getByLabel("Your mobile number")).toHaveValue("0400 000 002");
-    await page.getByLabel(/This is my number/).check();
+    await page.getByLabel(/This is my number/).check({ force: true });
     await page.getByRole("button", { name: "Turn on phone calls" }).click();
-    await expect(page.getByText("Calls are on.")).toBeVisible();
+    await expect(page.getByText("Calls are on", { exact: true })).toBeVisible();
     await expect(page.getByText("+614 ••••• 002")).toBeVisible();
 
     const userId = await appUserId(account.authUserId);

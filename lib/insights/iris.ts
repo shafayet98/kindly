@@ -77,7 +77,14 @@ export function describeBasis(
   }
   const parts: string[] = [];
   if (talks.size) parts.push(`the ${talks.size === 1 ? "conversation" : "conversations"} with ${[...talks.values()].join(" and ")}`);
-  if (days.size) parts.push(`check-ins added on ${[...days].sort().map(dayLabel).join(", ")}`);
+  if (days.size) {
+    const sorted = [...days].sort();
+    parts.push(
+      sorted.length <= 3
+        ? `check-ins added on ${sorted.map(dayLabel).join(", ")}`
+        : `check-ins added on ${sorted.length} days between ${dayLabel(sorted[0])} and ${dayLabel(sorted[sorted.length - 1])}`,
+    );
+  }
   return parts.length ? `Based on ${parts.join(", and ")}` : "Based on goal check-offs";
 }
 

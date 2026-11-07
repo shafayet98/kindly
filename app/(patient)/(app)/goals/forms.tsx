@@ -6,7 +6,6 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { correctEntry, logCheckIn, type HabitState } from "./actions";
 
 const initial: HabitState = { status: "idle" };
-const field = "rounded-xl border border-border bg-surface px-3 py-2 font-normal";
 
 function Result({ state }: { state: HabitState }) {
   if (!state.message) return null;
@@ -16,23 +15,33 @@ function Result({ state }: { state: HabitState }) {
 export function LogCheckInForm() {
   const [state, action] = useActionState(logCheckIn, initial);
   return (
-    <form action={action} className="flex flex-col gap-3">
+    <form action={action} className="card card--sunken stack-24">
       <Result state={state} />
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="flex flex-col gap-1.5 font-semibold">
-          What kind?
-          <select name="kind" className={field} defaultValue="activity">
+      <div className="grid items-end gap-4 md:grid-cols-[200px_1fr_180px]">
+        <div className="field">
+          <label className="field__label" htmlFor="ci-kind">
+            What kind?
+          </label>
+          <select className="select" id="ci-kind" name="kind" defaultValue="activity">
             <option value="activity">Activity</option>
-            <option value="food">Food</option>
+            <option value="food">Food & drink</option>
             <option value="sleep">Sleep</option>
             <option value="smoking">Smoking</option>
             <option value="mood">How I&apos;m feeling</option>
             <option value="other">Something else</option>
           </select>
-        </label>
-        <label className="flex flex-col gap-1.5 font-semibold">
-          When?
-          <select name="daysAgo" className={field} defaultValue="0">
+        </div>
+        <div className="field">
+          <label className="field__label" htmlFor="ci-desc">
+            In your own words
+          </label>
+          <input className="input" id="ci-desc" name="description" required maxLength={300} placeholder="e.g. Slept about 7 hours" />
+        </div>
+        <div className="field">
+          <label className="field__label" htmlFor="ci-day">
+            When?
+          </label>
+          <select className="select" id="ci-day" name="daysAgo" defaultValue="0">
             <option value="0">Today</option>
             <option value="1">Yesterday</option>
             {[2, 3, 4, 5, 6].map((n) => (
@@ -41,20 +50,20 @@ export function LogCheckInForm() {
               </option>
             ))}
           </select>
-        </label>
+        </div>
       </div>
-      <label className="flex flex-col gap-1.5 font-semibold">
-        In your own words
-        <input name="description" required maxLength={300} placeholder="e.g. Walked to the shops and back" className={field} />
-      </label>
-      <div className="grid grid-cols-2 gap-3">
-        <label className="flex flex-col gap-1.5 font-semibold">
-          Amount <span className="text-sm font-normal text-muted">(optional)</span>
-          <input name="value" type="number" min={0} step="any" inputMode="decimal" className={field} />
-        </label>
-        <label className="flex flex-col gap-1.5 font-semibold">
-          Unit
-          <select name="unit" className={field} defaultValue="">
+      <div className="grid items-end gap-4 md:grid-cols-[160px_180px_auto]">
+        <div className="field">
+          <label className="field__label" htmlFor="ci-value">
+            Amount <span className="field__opt">(optional)</span>
+          </label>
+          <input className="input" id="ci-value" name="value" type="number" min={0} step="any" inputMode="decimal" />
+        </div>
+        <div className="field">
+          <label className="field__label" htmlFor="ci-unit">
+            Unit
+          </label>
+          <select className="select" id="ci-unit" name="unit" defaultValue="">
             <option value="">—</option>
             <option value="minutes">minutes</option>
             <option value="hours">hours</option>
@@ -63,9 +72,11 @@ export function LogCheckInForm() {
             <option value="km">km</option>
             <option value="servings">servings</option>
           </select>
-        </label>
+        </div>
+        <div>
+          <SubmitButton variant="secondary">Save check-in</SubmitButton>
+        </div>
       </div>
-      <SubmitButton className="self-start">Save check-in</SubmitButton>
     </form>
   );
 }
@@ -73,22 +84,28 @@ export function LogCheckInForm() {
 export function CorrectEntryForm({ id, value, description }: { id: string; value: string | null; description: string | null }) {
   const [state, action] = useActionState(correctEntry, initial);
   return (
-    <form action={action} className="mt-2 flex flex-col gap-2 rounded-xl bg-background p-3">
+    <form action={action} className="move-panel stack">
       <input type="hidden" name="id" value={id} />
       <Result state={state} />
-      <div className="grid gap-2 sm:grid-cols-[8rem_1fr]">
-        <label className="flex flex-col gap-1 text-sm font-semibold">
-          Correct amount
-          <input name="value" type="number" min={0} step="any" defaultValue={value ?? ""} className={field} />
-        </label>
-        <label className="flex flex-col gap-1 text-sm font-semibold">
-          Correct description
-          <input name="description" maxLength={300} defaultValue={description ?? ""} className={field} />
-        </label>
+      <div className="grid gap-3 sm:grid-cols-[8rem_1fr]">
+        <div className="field">
+          <label className="field__label" htmlFor={`${id}-value`}>
+            Correct amount
+          </label>
+          <input className="input" id={`${id}-value`} name="value" type="number" min={0} step="any" defaultValue={value ?? ""} />
+        </div>
+        <div className="field">
+          <label className="field__label" htmlFor={`${id}-desc`}>
+            Correct description
+          </label>
+          <input className="input" id={`${id}-desc`} name="description" maxLength={300} defaultValue={description ?? ""} />
+        </div>
       </div>
-      <SubmitButton variant="secondary" className="self-start">
-        Save correction
-      </SubmitButton>
+      <div>
+        <SubmitButton variant="secondary" size="sm">
+          Save correction
+        </SubmitButton>
+      </div>
     </form>
   );
 }

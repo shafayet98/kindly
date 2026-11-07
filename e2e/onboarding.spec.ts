@@ -35,7 +35,7 @@ test.describe("first-time onboarding", () => {
       const [user] = await db.execute<{ timezone: string; country_code: string; timezone_source: string }>(sql`select timezone, country_code, timezone_source from users where id = ${userId}`);
       expect(user).toEqual({ timezone: "Asia/Dubai", country_code: "AE", timezone_source: "location" });
 
-      await page.getByLabel(/Keep a short summary/).check();
+      await page.getByLabel(/Keep a short summary/).check({ force: true });
       await page.getByRole("button", { name: "Continue" }).click();
       await expect(page.getByRole("heading", { name: "Want to start with one small goal?" })).toBeVisible();
       await page.getByRole("button", { name: "Finish and go to my dashboard" }).click();

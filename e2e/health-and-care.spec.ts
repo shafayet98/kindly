@@ -77,7 +77,7 @@ test("Sarah's private notes stay with Sarah: other agents, reports and clinician
   await signIn(page, "demo.patient@example.com");
   await expect(page).toHaveURL(/\/dashboard$/);
   await page.goto("/care-sharing");
-  for (const box of await page.getByRole("checkbox").all()) await box.check();
+  for (const box of await page.getByRole("checkbox").all()) await box.check({ force: true });
   await page.getByRole("button", { name: "Prepare a preview" }).click();
   await expect(page.getByRole("heading", { name: "Report preview" })).toBeVisible();
   await expect(page.getByText("Private wellbeing conversations and notes")).toBeVisible();
@@ -100,9 +100,9 @@ test("a report the patient doesn't share is invisible to the clinician; a shared
   const reportId = reportUrl.pathname.split("/").pop()!;
   await expect(page.getByText(/“Morning walk”: \d+ of \d+ sessions done/)).toBeVisible();
 
-  // Sharing needs the explicit confirmation box.
-  await page.getByRole("button", { name: "Share report" }).click();
-  await expect(page.getByText("Please confirm you want to share this report.")).toBeVisible();
+  // Sharing needs the explicit confirmation box: until it's ticked the button is unavailable
+  // (and the server refuses a share without it).
+  await expect(page.getByRole("button", { name: "Share report" })).toBeDisabled();
 
   // Not shared yet: the clinician sees nothing (AC-09).
   const clinicianContext = await browser.newContext();
@@ -114,7 +114,7 @@ test("a report the patient doesn't share is invisible to the clinician; a shared
   expect(hidden?.status()).toBe(404);
 
   // Share it (AC-10).
-  await page.getByLabel(/I've checked this report/).check();
+  await page.getByLabel(/I've checked this report/).check({ force: true });
   await page.getByRole("button", { name: "Share report" }).click();
   await expect(page.getByText(/Shared with Dr Sam Taylor/)).toBeVisible();
   const consents = await db.execute<{ scope: Record<string, string> }>(sql`select scope from consents where purpose = 'clinician_sharing' and status = 'granted'`);
@@ -126,7 +126,7 @@ test("a report the patient doesn't share is invisible to the clinician; a shared
   await clinician.getByRole("button", { name: "Mark as reviewed" }).click();
   await expect(clinician.getByText("You marked this report as reviewed.")).toBeVisible();
   await page.reload();
-  await expect(page.getByText(/reviewed/)).toBeVisible();
+  await expect(page.getByText(/^Reviewed/).first()).toBeVisible();
 
   // Another patient can't open Alex's report (AC-16).
   const otherContext = await browser.newContext();
@@ -167,8 +167,10 @@ test("export and permanent account deletion", async ({ page }) => {
     expect(data.goals.map((goal: { title: string }) => goal.title)).toEqual(["Walk"]);
 
     await page.goto("/settings/privacy");
-    await page.getByRole("button", { name: "Delete my account and data" }).click();
-    await expect(page.getByText("Type DELETE to confirm.", { exact: true })).toBeVisible();
+    // The button stays disabled until the word is typed exactly.
+    await expect(page.getByRole("button", { name: "Delete my account and data" })).toBeDisabled();
+    await page.getByLabel("Type DELETE to confirm").fill("delete");
+    await expect(page.getByRole("button", { name: "Delete my account and data" })).toBeDisabled();
     await page.getByLabel("Type DELETE to confirm").fill("DELETE");
     await page.getByRole("button", { name: "Delete my account and data" }).click();
     await expect(page.getByText("Your account and data have been deleted.")).toBeVisible();
