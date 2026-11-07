@@ -3,7 +3,7 @@
 import { useActionState } from "react";
 import { Notice } from "@/components/ui/notice";
 import { SubmitButton } from "@/components/ui/submit-button";
-import { addGoal, correctEntry, logCheckIn, type HabitState } from "./actions";
+import { correctEntry, logCheckIn, type HabitState } from "./actions";
 
 const initial: HabitState = { status: "idle" };
 const field = "rounded-xl border border-border bg-surface px-3 py-2 font-normal";
@@ -13,7 +13,7 @@ function Result({ state }: { state: HabitState }) {
   return <Notice tone={state.status === "error" ? "error" : "success"}>{state.message}</Notice>;
 }
 
-export function LogCheckInForm({ goals }: { goals: { id: string; title: string }[] }) {
+export function LogCheckInForm() {
   const [state, action] = useActionState(logCheckIn, initial);
   return (
     <form action={action} className="flex flex-col gap-3">
@@ -65,19 +65,6 @@ export function LogCheckInForm({ goals }: { goals: { id: string; title: string }
           </select>
         </label>
       </div>
-      {goals.length > 0 && (
-        <label className="flex flex-col gap-1.5 font-semibold">
-          Counts towards a goal?
-          <select name="goalId" className={field} defaultValue="">
-            <option value="">No</option>
-            {goals.map((goal) => (
-              <option key={goal.id} value={goal.id}>
-                {goal.title}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
       <SubmitButton className="self-start">Save check-in</SubmitButton>
     </form>
   );
@@ -101,39 +88,6 @@ export function CorrectEntryForm({ id, value, description }: { id: string; value
       </div>
       <SubmitButton variant="secondary" className="self-start">
         Save correction
-      </SubmitButton>
-    </form>
-  );
-}
-
-export function AddGoalForm() {
-  const [state, action] = useActionState(addGoal, initial);
-  return (
-    <form action={action} className="flex flex-col gap-3">
-      <Result state={state} />
-      <label className="flex flex-col gap-1.5 font-semibold">
-        Goal
-        <input name="title" required maxLength={80} placeholder="e.g. Stretch in the morning" className={field} />
-      </label>
-      <div className="grid grid-cols-2 gap-3">
-        <label className="flex flex-col gap-1.5 font-semibold">
-          Area
-          <select name="type" className={field} defaultValue="activity">
-            <option value="activity">Activity</option>
-            <option value="nutrition">Food</option>
-            <option value="sleep">Sleep</option>
-            <option value="smoking">Smoking</option>
-            <option value="wellbeing">Wellbeing</option>
-            <option value="other">Other</option>
-          </select>
-        </label>
-        <label className="flex flex-col gap-1.5 font-semibold">
-          Times a week <span className="text-sm font-normal text-muted">(optional)</span>
-          <input name="timesPerWeek" type="number" min={1} max={14} className={field} />
-        </label>
-      </div>
-      <SubmitButton variant="secondary" className="self-start">
-        Add goal
       </SubmitButton>
     </form>
   );

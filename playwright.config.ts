@@ -19,6 +19,7 @@ export default defineConfig({
       use: {
         ...devices["Pixel 7"],
         permissions: ["microphone"],
+        timezoneId: "Australia/Adelaide",
         // A synthetic microphone so browser voice calls can run headless.
         launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] },
       },

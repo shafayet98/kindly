@@ -35,3 +35,18 @@ export async function appUserId(authUserId: string) {
 }
 
 export { db, sql };
+
+/** Walks a brand-new account through onboarding: optional name, device timezone, chosen permissions, no goal. */
+export async function completeOnboarding(page: Page, options: { nickname?: string; consents?: (string | RegExp)[] } = {}) {
+  await expect(page.getByRole("heading", { name: "Welcome to Kindly" })).toBeVisible();
+  if (options.nickname) await page.getByLabel(/What should we call you/).fill(options.nickname);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { name: "Where are you?" })).toBeVisible();
+  await page.getByRole("button", { name: /use this device's timezone/ }).click();
+  await expect(page.getByRole("heading", { name: "Your privacy choices" })).toBeVisible();
+  for (const label of options.consents ?? []) await page.getByLabel(label).check();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { name: "Want to start with one small goal?" })).toBeVisible();
+  await page.getByRole("button", { name: "Finish and go to my dashboard" }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+}

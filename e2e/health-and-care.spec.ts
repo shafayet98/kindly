@@ -2,7 +2,8 @@ import { expect, test } from "@playwright/test";
 import { runTool } from "@/lib/agents/tools/run";
 import { setConsent } from "@/lib/consent/store";
 import { createReport, shareReport } from "@/lib/reports/service";
-import { appUserId, createConfirmedUser, db, deleteUser, signIn, sql } from "./helpers";
+import { createGoal } from "@/lib/goals/service";
+import { appUserId, completeOnboarding, createConfirmedUser, db, deleteUser, signIn, sql } from "./helpers";
 
 async function alex() {
   const [row] = await db.execute<{ id: string; timezone: string }>(sql`select id, timezone from users where display_name = 'Alex Rivera'`);
@@ -12,7 +13,8 @@ async function alex() {
 test("vague food reports are stored as described, without invented numbers (AC-07)", async ({ page }) => {
   await signIn(page, "demo.patient@example.com");
   await expect(page).toHaveURL(/\/dashboard$/);
-  await page.goto("/habits");
+  await page.goto("/goals");
+  await page.getByText("Other check-ins").click();
   await page.getByLabel("What kind?").selectOption("food");
   await page.getByLabel("In your own words").fill("A big bowl of pasta for lunch");
   await page.getByRole("button", { name: "Save check-in" }).click();
@@ -47,7 +49,8 @@ test("a correction links to the original and summaries use the corrected value (
 
   await signIn(page, "demo.patient@example.com");
   await expect(page).toHaveURL(/\/dashboard$/);
-  await page.goto("/habits");
+  await page.goto("/goals");
+  await page.getByText("Other check-ins").click();
   const entry = page.getByRole("listitem").filter({ hasText: "“walked 30 minutes”" }); // description kept
   await expect(entry).toHaveCount(1);
   await expect(entry).toContainText("Activity · 20 minutes");
@@ -95,7 +98,7 @@ test("a report the patient doesn't share is invisible to the clinician; a shared
   await expect(page.getByRole("heading", { name: "Report preview" })).toBeVisible();
   const reportUrl = new URL(page.url());
   const reportId = reportUrl.pathname.split("/").pop()!;
-  await expect(page.getByText("Walk three times a week")).toBeVisible();
+  await expect(page.getByText(/“Morning walk”: \d+ of \d+ sessions done/)).toBeVisible();
 
   // Sharing needs the explicit confirmation box.
   await page.getByRole("button", { name: "Share report" }).click();
@@ -119,7 +122,7 @@ test("a report the patient doesn't share is invisible to the clinician; a shared
 
   await clinician.goto(`/clinician/reports/${reportId}`);
   await expect(clinician.getByRole("heading", { name: "Shared report: Alex Rivera" })).toBeVisible();
-  await expect(clinician.getByText("Walk three times a week")).toBeVisible();
+  await expect(clinician.getByText(/“Morning walk”: \d+ of \d+ sessions done/)).toBeVisible();
   await clinician.getByRole("button", { name: "Mark as reviewed" }).click();
   await expect(clinician.getByText("You marked this report as reviewed.")).toBeVisible();
   await page.reload();
@@ -146,13 +149,9 @@ test("export and permanent account deletion", async ({ page }) => {
   let deleted = false;
   try {
     await signIn(page, account.email);
-    await page.getByRole("button", { name: "Skip for now" }).click();
-    await expect(page.getByRole("heading", { name: "Want to start with one small goal?" })).toBeVisible();
-    await page.getByLabel("Walk three times a week").check();
-    await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByRole("button", { name: "Finish and go to my dashboard" }).click();
-    await expect(page).toHaveURL(/\/dashboard$/);
+    await completeOnboarding(page);
     const userId = await appUserId(account.authUserId);
+    await createGoal(userId, { title: "Walk", category: "walk", cadence: "weekly", targetCount: 3, daysOfWeek: null, times: [], durationMinutes: null, notes: null }, { type: "patient" });
 
     // Give the account a shared report, so deletion has to clean up consents and shares too.
     const [clinician] = await db.execute<{ id: string }>(sql`select id from users where display_name = 'Dr Sam Taylor'`);
@@ -165,7 +164,7 @@ test("export and permanent account deletion", async ({ page }) => {
     expect(exported.headers()["content-disposition"]).toContain("attachment");
     const data = await exported.json();
     expect(data.user.id).toBe(userId);
-    expect(data.goals.map((goal: { title: string }) => goal.title)).toEqual(["Walk three times a week"]);
+    expect(data.goals.map((goal: { title: string }) => goal.title)).toEqual(["Walk"]);
 
     await page.goto("/settings/privacy");
     await page.getByRole("button", { name: "Delete my account and data" }).click();

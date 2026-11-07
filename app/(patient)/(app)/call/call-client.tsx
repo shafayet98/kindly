@@ -56,12 +56,18 @@ export function CallClient({ startAgent, topic }: { startAgent: VoiceAgentKey; t
   const uiSwitchRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const speakingRef = useRef(false);
+  const activeRef = useRef<VoiceAgentKey>(startAgent);
+  // What was said, tagged with who was speaking, kept only in this tab. Sent once at the end so a
+  // summary can be written (if the person turned summaries on); the server doesn't keep it.
+  const transcriptRef = useRef(new Map<string, { agent: VoiceAgentKey; role: "user" | "assistant"; text: string }>());
 
   const endCall = useCallback((reason?: string) => {
     if (timerRef.current) clearTimeout(timerRef.current);
     sessionRef.current?.close();
     sessionRef.current = null;
-    if (sessionIdRef.current) void postJson("/api/voice/events", { type: "end", sessionId: sessionIdRef.current }, true);
+    if (sessionIdRef.current) {
+      void postJson("/api/voice/events", { type: "end", sessionId: sessionIdRef.current, transcript: transcriptForSummary(transcriptRef.current) }, true);
+    }
     sessionIdRef.current = null;
     setSpeaking(false);
     setSwitchingTo(null);
@@ -84,6 +90,8 @@ export function CallClient({ startAgent, topic }: { startAgent: VoiceAgentKey; t
     setCaptions([]);
     setSafetyMessage(null);
     setActive(startAgent);
+    activeRef.current = startAgent;
+    transcriptRef.current = new Map();
     setStatus("connecting");
 
     const response = await postJson("/api/voice/session", { agent: startAgent, topic });
@@ -126,6 +134,7 @@ export function CallClient({ startAgent, topic }: { startAgent: VoiceAgentKey; t
       const to = agentKeyOf(toAgent);
       if (crossesPrivacyBoundary(from, to)) session.updateHistory(pruneForHandoff);
       setActive(to);
+      activeRef.current = to;
       setSwitchingTo(to);
       setCaptions([]);
       void postJson("/api/voice/events", { type: "handoff", sessionId, from, to, via: uiSwitchRef.current ? "ui" : "voice" });
@@ -151,7 +160,16 @@ export function CallClient({ startAgent, topic }: { startAgent: VoiceAgentKey; t
         setSafetyMessage(null);
       }
     });
-    session.on("history_updated", (history) => setCaptions(toCaptions(history)));
+    session.on("history_updated", (history) => {
+      setCaptions(toCaptions(history));
+      for (const item of history) {
+        if (item.type !== "message" || item.role === "system") continue;
+        const text = messageText(item);
+        if (!text) continue;
+        const known = transcriptRef.current.get(item.itemId);
+        transcriptRef.current.set(item.itemId, { agent: known?.agent ?? activeRef.current, role: item.role, text });
+      }
+    });
     // Non-fatal API errors (e.g. cancelling a response that already finished) don't end the call;
     // a dropped connection is handled below.
     session.on("error", () => console.warn("realtime session reported an error"));
@@ -310,15 +328,32 @@ export function CallClient({ startAgent, topic }: { startAgent: VoiceAgentKey; t
   );
 }
 
+function messageText(item: Extract<RealtimeItem, { type: "message" }>) {
+  return item.content
+    .map((part) => ("transcript" in part && part.transcript) || ("text" in part && part.text) || "")
+    .join(" ")
+    .trim();
+}
+
 function toCaptions(history: RealtimeItem[]): Caption[] {
   const captions: Caption[] = [];
   for (const item of history) {
     if (item.type !== "message" || item.role === "system") continue;
-    const text = item.content
-      .map((part) => ("transcript" in part && part.transcript) || ("text" in part && part.text) || "")
-      .join(" ")
-      .trim();
+    const text = messageText(item);
     if (text) captions.push({ id: item.itemId, who: item.role === "user" ? "You" : "Kindly", text });
   }
   return captions.slice(-20);
+}
+
+/** The most recent part of the conversation that fits in one small request. */
+function transcriptForSummary(map: Map<string, { agent: VoiceAgentKey; role: "user" | "assistant"; text: string }>) {
+  const segments = [...map.values()].map((segment) => ({ ...segment, text: segment.text.slice(0, 2000) }));
+  let size = 0;
+  const kept: typeof segments = [];
+  for (const segment of segments.reverse()) {
+    size += segment.text.length + 40;
+    if (size > 30_000 || kept.length >= 400) break;
+    kept.unshift(segment);
+  }
+  return kept;
 }

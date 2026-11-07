@@ -26,5 +26,7 @@ test("security headers are set", async ({ request }) => {
   expect(response.headers()["x-frame-options"]).toBe("DENY");
   expect(response.headers()["x-content-type-options"]).toBe("nosniff");
   expect(response.headers()["permissions-policy"]).toContain("microphone=(self)");
+  expect(response.headers()["permissions-policy"]).toContain("geolocation=(self)");
+  expect(response.headers()["permissions-policy"]).toContain("camera=()");
   expect(response.headers()["x-powered-by"]).toBeUndefined();
 });

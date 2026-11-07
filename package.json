@@ -22,7 +22,8 @@
     "phone:smoke": "tsx scripts/phone-bridge-smoke.ts",
     "scheduler:check": "tsx scripts/scheduler-check.ts",
     "voice:smoke:health": "tsx scripts/voice-smoke-health.ts",
-    "safety:smoke": "tsx scripts/safety-smoke.ts"
+    "safety:smoke": "tsx scripts/safety-smoke.ts",
+    "summary:smoke": "tsx scripts/summary-smoke.ts"
   },
   "dependencies": {
     "@fastify/formbody": "^9.0.1",
@@ -31,19 +32,21 @@
     "@openai/agents-extensions": "0.21.0",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.119.0",
+    "countries-and-timezones": "3.11.0",
+    "dotenv": "^18.0.9",
     "drizzle-orm": "0.45.4",
     "fastify": "5.12.8",
+    "geo-tz": "8.1.11",
     "next": "16.4.5",
     "openai": "7.51.0",
     "postgres": "^3.4.9",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "server-only": "^0.0.1",
+    "tsx": "^4.23.15",
     "twilio": "6.2.0",
     "ws": "^8.22.1",
-    "zod": "^4.6.7",
-    "tsx": "^4.23.15",
-    "dotenv": "^18.0.9"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.1",

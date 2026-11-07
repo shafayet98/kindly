@@ -3,20 +3,35 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { eq } from "drizzle-orm";
 import { audit } from "@/lib/audit";
 import { requireOnboardedPatient } from "@/lib/auth/session";
 import { setConsent } from "@/lib/consent/store";
+import { db, schema } from "@/lib/db";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { deleteWellbeingNote } from "@/lib/wellbeing/notes";
 
-const TOGGLEABLE = z.enum(["health_data_processing", "browser_voice", "sensitive_wellbeing"]);
+const TOGGLEABLE = z.enum(["health_data_processing", "browser_voice", "sensitive_wellbeing", "conversation_summaries"]);
 
 export async function toggleConsent(formData: FormData) {
   const user = await requireOnboardedPatient();
   const purpose = TOGGLEABLE.safeParse(formData.get("purpose"));
   if (!purpose.success) return;
   await setConsent(user.id, purpose.data, formData.get("grant") === "true");
+  revalidatePath("/settings/privacy");
+}
+
+/** Whether summaries may include the part of a call spent with Sarah. Off unless chosen. */
+export async function toggleSarahInSummaries(formData: FormData) {
+  const user = await requireOnboardedPatient();
+  const include = formData.get("include") === "true";
+  const [profile] = await db.select({ preferences: schema.patientProfiles.preferences }).from(schema.patientProfiles).where(eq(schema.patientProfiles.userId, user.id));
+  await db
+    .update(schema.patientProfiles)
+    .set({ preferences: { ...(profile?.preferences ?? {}), summariesIncludeSarah: include } })
+    .where(eq(schema.patientProfiles.userId, user.id));
+  await audit({ actorUserId: user.id, actorType: "patient", resourceType: "preferences", resourceId: user.id, action: `summaries.sarah_${include ? "included" : "excluded"}`, result: "success" });
   revalidatePath("/settings/privacy");
 }
 

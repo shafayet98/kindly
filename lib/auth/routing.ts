@@ -27,6 +27,7 @@ const PROTECTED_PREFIXES = [
   "/settings",
   "/check-in",
   "/activity",
+  "/goals",
   "/clinician",
   "/auth/reset-password",
 ];

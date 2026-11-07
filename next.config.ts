@@ -6,13 +6,15 @@ const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  // The microphone is only for this site's own call page; nothing else is allowed.
-  { key: "Permissions-Policy", value: "microphone=(self), camera=(), geolocation=(), payment=()" },
+  // The microphone (calls) and location (timezone setup) only for this site itself; nothing else.
+  { key: "Permissions-Policy", value: "microphone=(self), geolocation=(self), camera=(), payment=()" },
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
 ];
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Reads its timezone boundary data from disk at runtime, so it must not be bundled.
+  serverExternalPackages: ["geo-tz"],
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

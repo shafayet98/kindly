@@ -3,8 +3,6 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import { isVoiceAgentKey } from "@/lib/agents/voice-agents";
 import { requireOnboardedPatient } from "@/lib/auth/session";
 import { getConsentState } from "@/lib/consent/store";
-import { getFocusAreas } from "@/lib/preferences/store";
-import { suggestedAgents } from "@/lib/preferences/suggestions";
 import { allowBrowserVoice } from "./actions";
 import { CallClient } from "./call-client";
 
@@ -12,11 +10,11 @@ export const metadata: Metadata = { title: "Talk now" };
 
 export default async function CallPage({ searchParams }: PageProps<"/call">) {
   const user = await requireOnboardedPatient();
-  const [consents, areas, params] = await Promise.all([getConsentState(user.id), getFocusAreas(user.id), searchParams]);
+  const [consents, params] = await Promise.all([getConsentState(user.id), searchParams]);
 
-  // An explicit choice (link or button) wins; otherwise suggest from focus areas.
+  // Start with the companion the person picked; Natalie otherwise. They can switch any time.
   const requested = params.agent;
-  const startAgent = isVoiceAgentKey(requested) ? requested : (suggestedAgents(areas).find(isVoiceAgentKey) ?? "natalie");
+  const startAgent = isVoiceAgentKey(requested) ? requested : "natalie";
   const topic = params.topic === "unwell" || params.topic === "plan" ? params.topic : null;
 
   if (!consents.browser_voice) {

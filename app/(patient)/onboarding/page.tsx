@@ -1,26 +1,24 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { Wordmark } from "@/components/brand";
 import { eq } from "drizzle-orm";
+import { Wordmark } from "@/components/brand";
 import { requirePatient } from "@/lib/auth/session";
+import { getConsentState } from "@/lib/consent/store";
 import { db, schema } from "@/lib/db";
-import { getFocusAreas } from "@/lib/preferences/store";
-import { goalSuggestions } from "@/lib/preferences/suggestions";
-import { FocusAreasStep, GoalStep, PrivacyStep } from "./steps";
+import { ONBOARDING_STEPS, type OnboardingStep } from "./steps-config";
+import { GoalStep, LocationStep, NameStep, PrivacyStep } from "./steps";
 
 export const metadata: Metadata = { title: "Get started" };
-
-const STEPS = ["focus_areas", "goal", "privacy"] as const;
 
 export default async function OnboardingPage() {
   const user = await requirePatient();
   // Onboarding runs once. Finished (or fully skipped) users never see it again.
   if (user.onboardingCompletedAt) redirect("/dashboard");
 
-  const step = STEPS.find((s) => s === user.onboardingStep) ?? "focus_areas";
-  const [areas, [profile]] = await Promise.all([
-    getFocusAreas(user.id),
+  const step: OnboardingStep = ONBOARDING_STEPS.find((s) => s === user.onboardingStep) ?? "name";
+  const [[profile], consents] = await Promise.all([
     db.select({ nickname: schema.patientProfiles.nickname }).from(schema.patientProfiles).where(eq(schema.patientProfiles.userId, user.id)),
+    getConsentState(user.id),
   ]);
 
   return (
@@ -28,11 +26,12 @@ export default async function OnboardingPage() {
       <Wordmark href="/onboarding" />
       <main className="mt-6 w-full max-w-2xl">
         <p className="mb-2 text-sm font-semibold text-muted">
-          Step {STEPS.indexOf(step) + 1} of {STEPS.length}
+          Step {ONBOARDING_STEPS.indexOf(step) + 1} of {ONBOARDING_STEPS.length}
         </p>
-        {step === "focus_areas" && <FocusAreasStep selected={areas} nickname={profile?.nickname ?? null} />}
-        {step === "goal" && <GoalStep suggestions={goalSuggestions(areas)} />}
+        {step === "name" && <NameStep nickname={profile?.nickname ?? null} />}
+        {step === "location" && <LocationStep />}
         {step === "privacy" && <PrivacyStep />}
+        {step === "goal" && <GoalStep phoneCallsOn={consents.outbound_calls} />}
       </main>
     </div>
   );

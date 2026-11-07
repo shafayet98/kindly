@@ -8,10 +8,13 @@ export async function exportUserData(userId: string) {
     .select({ id: schema.users.id, displayName: schema.users.displayName, timezone: schema.users.timezone, preferredLanguage: schema.users.preferredLanguage, phoneE164: schema.users.phoneE164, createdAt: schema.users.createdAt })
     .from(schema.users)
     .where(eq(schema.users.id, userId));
-  const [profile, focusAreas, consents, goals, habitEvents, reminders, callPreferences, callJobs, callSessions, agentEvents, wellbeingNotes, planProposals, reports] =
+  const [goalSessions, conversationSummaries] = await Promise.all([
+    db.select().from(schema.goalSessions).where(byUser(schema.goalSessions)),
+    db.select().from(schema.conversationSummaries).where(byUser(schema.conversationSummaries)),
+  ]);
+  const [profile, consents, goals, habitEvents, reminders, callPreferences, callJobs, callSessions, agentEvents, wellbeingNotes, planProposals, reports] =
     await Promise.all([
       db.select().from(schema.patientProfiles).where(byUser(schema.patientProfiles)),
-      db.select().from(schema.userFocusAreas).where(byUser(schema.userFocusAreas)),
       db.select().from(schema.consents).where(byUser(schema.consents)),
       db.select().from(schema.goals).where(byUser(schema.goals)),
       db.select().from(schema.habitEvents).where(byUser(schema.habitEvents)),
@@ -35,12 +38,13 @@ export async function exportUserData(userId: string) {
     : [];
   return {
     exportedAt: new Date().toISOString(),
-    note: "Kindly never stores call audio or transcripts.",
+    note: "Kindly never stores call audio or transcripts. Conversation summaries are only kept if you turned them on.",
     user,
     profile,
-    focusAreas,
     consents,
     goals,
+    goalSessions,
+    conversationSummaries,
     habitEvents,
     reminders,
     callPreferences,

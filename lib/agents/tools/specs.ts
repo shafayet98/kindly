@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { AgentKey } from "@/lib/agents/directory";
+import { GOAL_CATEGORY_KEYS } from "@/lib/goals/categories";
 import { SAFETY_CATEGORIES } from "@/lib/safety/messages";
 
 // Isomorphic tool specs: safe to import in the browser. Implementations live in handlers.ts and
@@ -8,6 +9,7 @@ import { SAFETY_CATEGORIES } from "@/lib/safety/messages";
 const time = z.string().regex(/^([01][0-9]|2[0-3]):[0-5][0-9]$/).describe('24-hour local time, e.g. "17:00"');
 const id = z.string().max(64);
 const days = z.array(z.number().int().min(0).max(6)).min(1).max(7).describe("Days of the week, 0 = Sunday … 6 = Saturday");
+const times = z.array(time).max(6).describe("24-hour times, [] for any time");
 
 export type ToolSpec<P extends z.ZodObject = z.ZodObject> = {
   name: string;
@@ -30,9 +32,63 @@ export const TOOL_SPECS = {
   }),
   get_goals: spec({
     name: "get_goals",
-    description: "List the person's current goals.",
+    description: "List the person's current goals with ids, category, how often, days and times.",
     parameters: z.object({}),
-    agents: ["natalie", "theo", "iris"],
+    agents: ["natalie", "milo", "theo", "iris"],
+  }),
+  get_week_plan: spec({
+    name: "get_week_plan",
+    description:
+      "The person's planned goal sessions for the last 7 days and the next 7 days, each with an item_id and status " +
+      "(done, not_done, postponed, planned), plus counted goals (e.g. 1 of 3 this week).",
+    parameters: z.object({}),
+    agents: ["natalie", "milo", "theo"],
+  }),
+  propose_new_goal: spec({
+    name: "propose_new_goal",
+    description:
+      "Theo's planning service. Propose a new goal from what the person said. Pick the category yourself. " +
+      "Ask how often (and which days/time) first if they didn't say. Nothing is created yet: read the summary, ask them to confirm, " +
+      "then call confirm_action. Afterwards, offer a reminder (propose_new_reminder with the new goal's id).",
+    parameters: z.object({
+      title: z.string().min(2).max(80).describe('Short, in their words: "Walk", "30 push-ups", "Take blood pressure tablets"'),
+      category: z.enum(GOAL_CATEGORY_KEYS),
+      cadence: z.enum(["daily", "weekly", "monthly"]).describe("daily = every day or set days; weekly = N times a week; monthly = N times a month"),
+      target_count: z.number().int().min(1).max(50).describe("Sessions per day/week/month, not amounts within a session"),
+      days_of_week: days.nullable().describe("Only if they chose days; null for any day"),
+      times,
+      duration_minutes: z.number().int().min(1).max(600).nullable(),
+      notes: z.string().max(300).nullable(),
+      reason_in_their_words: z.string().max(300).nullable(),
+    }),
+    agents: ["natalie", "theo"],
+  }),
+  mark_goal_done: spec({
+    name: "mark_goal_done",
+    description:
+      "Record that the person did a goal session (\"I did my walk\", \"took my tablets\"). Use item_id from get_week_plan when you have it, " +
+      "otherwise goal_id with days_ago. No confirmation needed; it's what they told you.",
+    parameters: z.object({
+      item_id: z.string().max(120).nullable(),
+      goal_id: id.nullable(),
+      days_ago: z.number().int().min(0).max(6),
+      amount: z.number().min(0).max(100000).nullable(),
+      unit: z.enum(["minutes", "reps", "km", "steps", "glasses", "pages"]).nullable(),
+      note: z.string().max(300).nullable(),
+    }),
+    agents: ["natalie", "milo"],
+  }),
+  propose_postpone_session: spec({
+    name: "propose_postpone_session",
+    description:
+      "Move ONE planned session to another day or time, just that once (\"move today's walk to 5 PM\"). If they want it moved every time, " +
+      "change the goal with propose_plan_adjustment instead; ask if unclear. Nothing changes until confirm_action.",
+    parameters: z.object({
+      item_id: z.string().max(120),
+      days_from_today: z.number().int().min(0).max(14),
+      new_time: time.nullable(),
+    }),
+    agents: ["natalie", "milo"],
   }),
   propose_reminder_change: spec({
     name: "propose_reminder_change",
@@ -57,6 +113,7 @@ export const TOOL_SPECS = {
       time,
       days,
       delivery: z.enum(["in_app", "phone"]).describe("phone = Kindly calls their phone; in_app = shown in the app"),
+      goal_id: id.nullable().describe("The goal this reminds them about; its time and days are used when it has a set schedule"),
     }),
     agents: ["milo", "natalie"],
   }),
@@ -110,15 +167,18 @@ export const TOOL_SPECS = {
   propose_plan_adjustment: spec({
     name: "propose_plan_adjustment",
     description:
-      "Theo's planning service. Change one of the person's goals: how often, how long, its time (e.g. a bedtime), or its name. " +
-      "Use it when they ask to change a goal, or after a setback once they've said what got in the way. " +
-      "Get the goal id from get_goals. Nothing changes yet: read the summary, ask them to confirm, then call confirm_action.",
+      "Theo's planning service. Change one of the person's goals from now on: how often, which days, its time (e.g. a bedtime), " +
+      "how long, its name or category. Use it when they ask, or after a setback once they've said what got in the way. " +
+      "Get the goal id from get_goals. Leave fields null that don't change. Nothing changes yet: read the summary, ask them to confirm, then call confirm_action.",
     parameters: z.object({
       goal_id: id,
-      times_per_week: z.number().int().min(1).max(14).nullable(),
-      minutes: z.number().int().min(1).max(240).nullable(),
-      time: time.nullable().describe('The goal\'s time of day, 24-hour, e.g. bedtime 10 PM = "22:00"'),
-      new_title: z.string().min(3).max(80).nullable(),
+      title: z.string().min(2).max(80).nullable(),
+      category: z.enum(GOAL_CATEGORY_KEYS).nullable(),
+      cadence: z.enum(["daily", "weekly", "monthly"]).nullable(),
+      target_count: z.number().int().min(1).max(50).nullable(),
+      days_of_week: days.nullable(),
+      times: z.array(time).max(6).nullable().describe('24-hour times, e.g. bedtime 10 PM = ["22:00"]; [] for any time'),
+      duration_minutes: z.number().int().min(1).max(600).nullable(),
       reason_in_their_words: z.string().min(2).max(300),
     }),
     agents: ["natalie", "theo"],

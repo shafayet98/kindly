@@ -3,6 +3,7 @@ import {
   type AnyPgColumn,
   boolean,
   check,
+  date,
   index,
   integer,
   jsonb,
@@ -10,7 +11,6 @@ import {
   pgEnum,
   pgSchema,
   pgTable,
-  primaryKey,
   smallint,
   text,
   timestamp,
@@ -35,30 +35,23 @@ const updatedAt = () =>
 
 export const userRole = pgEnum("user_role", ["patient", "clinician"]);
 
-export const focusArea = pgEnum("focus_area", [
-  "health_habits",
-  "daily_planning",
-  "reminders_routines",
-  "emotional_wellbeing",
-  "feeling_unwell",
-  "track_progress",
-  "care_team_updates",
-]);
-
 export const consentPurpose = pgEnum("consent_purpose", [
   "browser_voice",
   "outbound_calls",
   "health_data_processing",
   "sensitive_wellbeing",
   "clinician_sharing",
+  "conversation_summaries",
 ]);
 export const consentStatus = pgEnum("consent_status", ["granted", "revoked"]);
 
 export const invitationStatus = pgEnum("invitation_status", ["pending", "approved", "revoked", "expired"]);
 export const relationshipStatus = pgEnum("relationship_status", ["pending", "active", "revoked"]);
 
-export const goalType = pgEnum("goal_type", ["activity", "nutrition", "smoking", "sleep", "wellbeing", "other"]);
 export const goalStatus = pgEnum("goal_status", ["active", "paused", "completed", "archived"]);
+export const goalCategory = pgEnum("goal_category", ["walk", "workout", "medication", "sleep", "food_drink", "smoking", "mindfulness", "other"]);
+export const goalCadence = pgEnum("goal_cadence", ["daily", "weekly", "monthly"]);
+export const goalSessionStatus = pgEnum("goal_session_status", ["planned", "done", "postponed"]);
 
 export const habitKind = pgEnum("habit_kind", ["activity", "food", "smoking", "sleep", "mood", "other"]);
 export const dataSource = pgEnum("data_source", ["patient_reported", "clinician_entered", "system"]);
@@ -107,6 +100,9 @@ export const users = pgTable(
     displayName: text("display_name"),
     timezone: text("timezone").notNull().default("Australia/Adelaide"),
     preferredLanguage: text("preferred_language").notNull().default("en"),
+    // ISO 3166 country code derived from the person's location or timezone. Never coordinates.
+    countryCode: text("country_code"),
+    timezoneSource: text("timezone_source"), // "location" | "device"
     // Collected later, only for consented outbound calls. Not an auth factor.
     phoneE164: text("phone_e164"),
     phoneConfirmedAt: timestamp("phone_confirmed_at", { withTimezone: true }),
@@ -139,24 +135,12 @@ export const patientProfiles = pgTable("patient_profiles", {
   nickname: text("nickname"),
   preferences: jsonb("preferences").$type<Record<string, unknown>>().notNull().default({}),
   // Where an unfinished onboarding resumes. Null once completed.
-  onboardingStep: text("onboarding_step").default("focus_areas"),
+  onboardingStep: text("onboarding_step").default("name"),
   // Set when onboarding finishes, including when every step was skipped.
   onboardingCompletedAt: timestamp("onboarding_completed_at", { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }).enableRLS();
-
-export const userFocusAreas = pgTable(
-  "user_focus_areas",
-  {
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    areaKey: focusArea("area_key").notNull(),
-    selectedAt: timestamp("selected_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [primaryKey({ columns: [t.userId, t.areaKey] })],
-).enableRLS();
 
 // ---------- Consent and care relationships ----------
 
@@ -204,10 +188,24 @@ export const goals = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    type: goalType("type").notNull(),
     title: text("title").notNull(),
-    // e.g. { "timesPerWeek": 3, "minutes": 20 }
-    target: jsonb("target").$type<Record<string, unknown>>().notNull().default({}),
+    category: goalCategory("category").notNull().default("other"),
+    cadence: goalCadence("cadence").notNull().default("weekly"),
+    // How many times per day / week / month.
+    targetCount: smallint("target_count").notNull().default(1),
+    // Planned days (0 = Sunday). Null means any day: a flexible "N times a week" goal.
+    daysOfWeek: smallint("days_of_week").array(),
+    // Planned local times "HH:MM". Empty means any time of day.
+    times: text("times").array().notNull().default(sql`'{}'`),
+    durationMinutes: smallint("duration_minutes"),
+    notes: text("notes"),
+    // A schedule change creates a new version: the old row ends, the new one starts, so past
+    // weeks keep the plan that applied at the time.
+    startsOn: date("starts_on", { mode: "string" }).notNull().default(sql`current_date`),
+    endsOn: date("ends_on", { mode: "string" }),
+    previousGoalId: uuid("previous_goal_id").references((): AnyPgColumn => goals.id, { onDelete: "set null" }),
+    createdByAgent: agentName("created_by_agent"),
+    createdInSessionId: uuid("created_in_session_id").references((): AnyPgColumn => callSessions.id, { onDelete: "set null" }),
     status: goalStatus("status").notNull().default("active"),
     // Set only for clinician-approved plans; self-chosen goals leave it null.
     approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
@@ -236,6 +234,7 @@ export const habitEvents = pgTable(
     source: dataSource("source").notNull().default("patient_reported"),
     certainty: certainty("certainty").notNull().default("medium"),
     recordedByAgent: agentName("recorded_by_agent"),
+    sessionId: uuid("session_id").references((): AnyPgColumn => callSessions.id, { onDelete: "set null" }),
     // A correction is a new row pointing at the row it replaces; the old row gets superseded_at.
     correctedFrom: uuid("corrected_from").references((): AnyPgColumn => habitEvents.id, { onDelete: "set null" }),
     supersededAt: timestamp("superseded_at", { withTimezone: true }),
@@ -344,6 +343,61 @@ export const agentEvents = pgTable(
   (t) => [index("agent_events_user_idx").on(t.userId, t.at)],
 ).enableRLS();
 
+// Status of individual planned sessions of a goal. Planned sessions are computed from the goal's
+// schedule; a row exists only once something happened (done, postponed, or moved in).
+export const goalSessions = pgTable(
+  "goal_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    goalId: uuid("goal_id")
+      .notNull()
+      .references(() => goals.id, { onDelete: "cascade" }),
+    scheduledDate: date("scheduled_date", { mode: "string" }).notNull(),
+    // "HH:MM" for timed sessions, "" for any-time sessions, "extra:<n>" for flexible-goal entries.
+    slotTime: text("slot_time").notNull().default(""),
+    status: goalSessionStatus("status").notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    movedToDate: date("moved_to_date", { mode: "string" }),
+    movedToTime: text("moved_to_time"),
+    movedFromDate: date("moved_from_date", { mode: "string" }),
+    movedFromTime: text("moved_from_time"),
+    value: numeric("value"),
+    unit: text("unit"),
+    note: text("note"),
+    recordedByAgent: agentName("recorded_by_agent"),
+    sessionId: uuid("session_id").references((): AnyPgColumn => callSessions.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("goal_sessions_slot_idx").on(t.goalId, t.scheduledDate, t.slotTime),
+    index("goal_sessions_user_date_idx").on(t.userId, t.scheduledDate),
+  ],
+).enableRLS();
+
+// Short AI-written summaries of conversations, visible only to the person. The words of a call are
+// never stored; only this summary, and only with the conversation_summaries consent.
+export const conversationSummaries = pgTable(
+  "conversation_summaries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sessionId: uuid("session_id")
+      .notNull()
+      .unique()
+      .references(() => callSessions.id, { onDelete: "cascade" }),
+    summary: text("summary").notNull(),
+    includesSarah: boolean("includes_sarah").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [index("conversation_summaries_user_idx").on(t.userId)],
+).enableRLS();
+
 // High-impact actions an agent proposes. They run only when confirmed, and at most once.
 export const actionConfirmations = pgTable(
   "action_confirmations",
@@ -395,6 +449,9 @@ export const planProposals = pgTable(
     proposal: jsonb("proposal").$type<Record<string, unknown>>().notNull(),
     rationale: text("rationale"),
     proposedByAgent: agentName("proposed_by_agent").notNull().default("theo"),
+    // The companion the person was talking to (null when changed in the app), and that conversation.
+    requestedByAgent: agentName("requested_by_agent"),
+    sessionId: uuid("session_id").references((): AnyPgColumn => callSessions.id, { onDelete: "set null" }),
     status: proposalStatus("status").notNull().default("proposed"),
     confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
     executedAt: timestamp("executed_at", { withTimezone: true }),

@@ -5,7 +5,12 @@ import { describeReminder, getOwnedReminder } from "@/lib/reminders/service";
 import { formatDays, formatTime12h } from "@/lib/scheduling/occurrences";
 import { HabitError, correctHabitEvent, logHabitEvent, recentHabitEvents } from "@/lib/habits/service";
 import { loadInsights } from "@/lib/insights/load";
-import { createPlanProposal, PlanError } from "@/lib/plans/service";
+import { GOAL_CATEGORIES } from "@/lib/goals/categories";
+import { describeSchedule } from "@/lib/goals/describe";
+import { countProgress, hasFixedSessions, parseItemKey } from "@/lib/goals/schedule";
+import { activeGoals, getOwnedGoal, GoalError, loadSessions, markSessionDone, normaliseGoal, type GoalInput } from "@/lib/goals/service";
+import { weekStartOf } from "@/lib/insights/iris";
+import { PlanError, proposeGoalChange, proposeNewGoal } from "@/lib/plans/service";
 import { addDays, localDate, zonedTimeToUtc } from "@/lib/time";
 import { recordAgentEvent } from "@/lib/voice/sessions";
 import { listWellbeingNotes, saveWellbeingNote, WellbeingNoteError } from "@/lib/wellbeing/notes";
@@ -48,12 +53,85 @@ export const handlers: ToolHandlers = {
   },
 
   async get_goals(ctx) {
-    const rows = await db
-      .select({ id: schema.goals.id, title: schema.goals.title, type: schema.goals.type, status: schema.goals.status, target: schema.goals.target })
-      .from(schema.goals)
-      .where(and(eq(schema.goals.userId, ctx.userId), inArray(schema.goals.status, ["active", "paused"])))
-      .orderBy(asc(schema.goals.createdAt));
-    return { goals: rows };
+    const goals = await activeGoals(ctx.userId);
+    return {
+      goals: goals.map((goal) => ({
+        goal_id: goal.id,
+        title: goal.title,
+        category: GOAL_CATEGORIES[goal.category].label,
+        schedule: describeSchedule(goal),
+        cadence: goal.cadence,
+        target_count: goal.targetCount,
+        days_of_week: goal.daysOfWeek,
+        times: goal.times,
+        clinician_approved: Boolean(goal.approvedBy),
+      })),
+    };
+  },
+
+  async get_week_plan(ctx) {
+    const today = localDate(new Date(), ctx.timezone);
+    const { items } = await loadSessions(ctx.userId, addDays(today, -7), addDays(today, 7), today);
+    const week = await loadSessions(ctx.userId, weekStartOf(today), addDays(weekStartOf(today), 6), today);
+    const counted = countProgress(week.plans, week.rows, weekStartOf(today));
+    return {
+      today,
+      sessions: items.map((item) => ({
+        item_id: item.key,
+        goal: item.title,
+        date: item.date,
+        time: item.time,
+        status: item.status,
+        moved_to: item.movedTo,
+      })),
+      counted_goals: counted.map((goal) => `${goal.title}: ${goal.done} of ${goal.target} this ${goal.period}`),
+    };
+  },
+
+  async propose_new_goal(ctx, input) {
+    const goal = normaliseGoal({
+      title: input.title,
+      category: input.category,
+      cadence: input.cadence,
+      targetCount: input.target_count,
+      daysOfWeek: input.days_of_week,
+      times: input.times,
+      durationMinutes: input.duration_minutes,
+      notes: input.notes,
+    });
+    const { proposalId, summary } = await proposeNewGoal(ctx.userId, goal, { requestedByAgent: ctx.agent, sessionId: ctx.sessionId, reason: input.reason_in_their_words });
+    const confirmationId = await proposeAction(ctx, { kind: "plan.adjust", payload: { proposalId } }, summary);
+    return { confirmation_id: confirmationId, summary, prepared_by: "Theo", next_step: ASK };
+  },
+
+  async mark_goal_done(ctx, input) {
+    const today = localDate(new Date(), ctx.timezone);
+    const ref = input.item_id ? parseItemKey(input.item_id) : input.goal_id ? { goalId: input.goal_id, date: addDays(today, -input.days_ago), slotTime: undefined } : null;
+    if (!ref || !UUID.test(ref.goalId)) return { error: "Say which session: call get_week_plan for item ids." };
+    try {
+      const { goal } = await markSessionDone(ctx.userId, ref, { value: input.amount, unit: input.unit, note: input.note }, { type: "agent", agent: ctx.agent, sessionId: ctx.sessionId });
+      return { saved: true, goal: goal.title, date: ref.date };
+    } catch (error) {
+      if (error instanceof GoalError) return { error: error.message };
+      throw error;
+    }
+  },
+
+  async propose_postpone_session(ctx, input) {
+    const ref = parseItemKey(input.item_id);
+    if (!ref || !UUID.test(ref.goalId)) return { error: "Unknown session. Call get_week_plan for item ids." };
+    const goal = await getOwnedGoal(ctx.userId, ref.goalId);
+    if (!goal) return { error: "Unknown session. Call get_week_plan for item ids." };
+    const toDate = addDays(localDate(new Date(), ctx.timezone), input.days_from_today);
+    const day = (date: string) => new Intl.DateTimeFormat("en-AU", { weekday: "long", day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
+    const at = (time: string | null) => (time ? ` at ${formatTime12h(time)}` : "");
+    const summary = `Move “${goal.title}” from ${day(ref.date)}${at(ref.slotTime.includes(":") && !ref.slotTime.startsWith("extra") ? ref.slotTime : null)} to ${day(toDate)}${at(input.new_time)}, just this once.`;
+    const confirmationId = await proposeAction(
+      ctx,
+      { kind: "session.postpone", payload: { goalId: ref.goalId, date: ref.date, slotTime: ref.slotTime, toDate, toTime: input.new_time } },
+      summary,
+    );
+    return { confirmation_id: confirmationId, summary, next_step: ASK };
   },
 
   async propose_reminder_change(ctx, input) {
@@ -79,7 +157,16 @@ export const handlers: ToolHandlers = {
   },
 
   async propose_new_reminder(ctx, input) {
-    const fields = { title: input.title.trim(), localTime: input.time, daysOfWeek: [...new Set(input.days)].sort(), channel: input.delivery };
+    let fields = { title: input.title.trim(), localTime: input.time, daysOfWeek: [...new Set(input.days)].sort(), channel: input.delivery, goalId: null as string | null };
+    if (input.goal_id) {
+      const goal = UUID.test(input.goal_id) ? await getOwnedGoal(ctx.userId, input.goal_id) : null;
+      if (!goal || goal.endsOn) return { error: "Unknown goal. Call get_goals first." };
+      fields = { ...fields, goalId: goal.id };
+      // Reminders for goals with a set schedule follow the goal's time and days.
+      if (hasFixedSessions(goal) && goal.times.length === 1) {
+        fields = { ...fields, localTime: goal.times[0], daysOfWeek: goal.daysOfWeek?.length ? goal.daysOfWeek : [0, 1, 2, 3, 4, 5, 6] };
+      }
+    }
     const summary = `Create ${describeReminder(fields)}.`;
     const confirmationId = await proposeAction(ctx, { kind: "reminder.create", payload: fields }, summary);
     return { confirmation_id: confirmationId, summary, next_step: ASK };
@@ -149,22 +236,31 @@ export const handlers: ToolHandlers = {
     const insights = await loadInsights(ctx.userId, ctx.timezone, 4);
     return {
       prepared_by: "Iris",
-      goals: insights.goals.map((goal) => ({ goal_id: goal.goalId, title: goal.title, summary: goal.statement.text, weeks: goal.weeks.map((w) => `${w.weekStart}: ${w.count}/${w.target}`) })),
-      observations: insights.observations.map((s) => s.text),
+      weeks: insights.weeks.map((week) => ({
+        week_of: week.weekStart,
+        done: week.totals.done,
+        not_done: week.totals.notDone,
+        postponed: week.totals.postponed,
+        still_planned: week.totals.planned,
+        counted: week.counted.map((goal) => `${goal.title}: ${goal.done}/${goal.target} this ${goal.period}`),
+      })),
       patterns_to_ask_about_not_conclusions: insights.hypotheses.map((s) => s.text),
-      missing_data: insights.missingData.map((s) => s.text),
+      recent_plan_changes: insights.planChanges.slice(0, 5).map((change) => change.text),
     };
   },
 
   async propose_plan_adjustment(ctx, input) {
     if (!UUID.test(input.goal_id)) return { error: "Unknown goal. Call get_goals first." };
-    const change: { timesPerWeek?: number; minutes?: number; time?: string; title?: string } = {};
-    if (input.times_per_week !== null) change.timesPerWeek = input.times_per_week;
-    if (input.minutes !== null) change.minutes = input.minutes;
-    if (input.time !== null) change.time = input.time;
-    if (input.new_title !== null) change.title = input.new_title;
+    const change: Partial<GoalInput> = {};
+    if (input.title !== null) change.title = input.title;
+    if (input.category !== null) change.category = input.category;
+    if (input.cadence !== null) change.cadence = input.cadence;
+    if (input.target_count !== null) change.targetCount = input.target_count;
+    if (input.days_of_week !== null) change.daysOfWeek = input.days_of_week;
+    if (input.times !== null) change.times = input.times;
+    if (input.duration_minutes !== null) change.durationMinutes = input.duration_minutes;
     try {
-      const { proposalId, summary } = await createPlanProposal(ctx.userId, input.goal_id, change, `Reason (patient's words): ${input.reason_in_their_words}`);
+      const { proposalId, summary } = await proposeGoalChange(ctx.userId, input.goal_id, change, { requestedByAgent: ctx.agent, sessionId: ctx.sessionId, reason: input.reason_in_their_words });
       const confirmationId = await proposeAction(ctx, { kind: "plan.adjust", payload: { proposalId } }, summary);
       return { confirmation_id: confirmationId, summary, prepared_by: "Theo", next_step: ASK };
     } catch (error) {

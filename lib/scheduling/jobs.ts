@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, ne, notLike, sql } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import { nextOccurrence } from "./occurrences";
 
@@ -35,7 +35,9 @@ export async function scheduleNextJob(reminderId: string, after = new Date()) {
   }
 
   await db.transaction(async (tx) => {
-    // Drop any other future job for this reminder (e.g. the old time after a reschedule).
+    // Drop any other future job for this reminder (e.g. the old time after a reschedule). One-off
+    // calls for a postponed session (":moved:" keys) are kept unless the reminder stopped.
+    const stopped = !reminder || reminder.status !== "active" || reminder.channel !== "phone";
     await tx
       .update(schema.callJobs)
       .set({ status: "cancelled", lastError: "superseded" })
@@ -44,6 +46,7 @@ export async function scheduleNextJob(reminderId: string, after = new Date()) {
           eq(schema.callJobs.reminderId, reminderId),
           eq(schema.callJobs.status, "scheduled"),
           due ? ne(schema.callJobs.dueAt, due) : sql`true`,
+          stopped ? sql`true` : notLike(schema.callJobs.idempotencyKey, "%:moved:%"),
         ),
       );
     if (!due || !reminder) return;

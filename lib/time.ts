@@ -46,3 +46,8 @@ export function dayOfWeek(date: string): number {
   const [year, month, day] = date.split("-").map(Number);
   return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
 }
+
+/** Monday that starts the week containing a "YYYY-MM-DD" date. */
+export function weekStartOf(date: string) {
+  return addDays(date, -((dayOfWeek(date) + 6) % 7));
+}

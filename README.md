@@ -59,6 +59,7 @@ The scheduler only runs when `SCHEDULER_ENABLED=true`, so starting the server an
 | `pnpm scheduler:check` | Runs the call scheduler against the database with a **fake** Twilio client (never dials): consent, races, retries, pause, quiet hours, expiry, errors |
 | `pnpm voice:smoke:health` | Natalie logs a check-in, corrects it, asks Iris for progress and agrees a smaller goal with Theo (real Realtime API; run `pnpm demo:reset` after) |
 | `pnpm safety:smoke` | Emergency and suicidal-distress messages trigger the predefined safety workflow, dosing advice is declined, prompt injection can't reach other users (real Realtime API) |
+| `pnpm summary:smoke` | Conversation summaries: Sarah's part excluded by default, included when opted in, injected instructions ignored (real model) |
 | `pnpm phone:smoke` | Drives the Twilio media-stream bridge with a simulated Twilio client: forged/replayed tokens rejected, Milo audio returned |
 | `pnpm db:generate` / `pnpm db:migrate` | Create / apply Drizzle migrations |
 
@@ -70,9 +71,22 @@ The scheduler only runs when `SCHEDULER_ENABLED=true`, so starting the server an
 - Moving into or out of Sarah deletes earlier conversation items from the live model context (`lib/voice/privacy.ts`).
 - Only structured events are stored (`call_sessions`, `agent_events`): no audio, no transcripts.
 
+## Goals and the weekly calendar
+
+- A **goal** has a category (walk, workout, medication, sleep, food & drink, smoking, mindfulness, other), a cadence (daily, weekly or monthly), how many times per period, and optionally days, times, minutes and notes. People type goals in plain words; `lib/goals/parse.ts` turns that into a draft with a small OpenAI model (schema-constrained and validated, with a keyword fallback), which they check before saving. Companions create goals with `propose_new_goal`.
+- **Sessions** are computed from each goal's schedule (`lib/goals/schedule.ts`, pure and unit-tested). A `goal_sessions` row exists only once something happened: done, postponed, or moved in. Past sessions not marked done count as not done; flexible weekly goals and monthly goals are counted rather than slotted.
+- **Schedule changes start a new version** of the goal from today (`starts_on` / `ends_on` / `previous_goal_id`), so past weeks keep the plan that applied then.
+- A reminder linked to a goal follows the goal's time and days. Moving the reminder moves the goal. Moving one session ("just today") also moves that day's reminder call.
+- **Progress** (`/progress`) lists weeks by category with done, not done and postponed. Patterns and plan changes say where they came from, e.g. "Based on the conversation with Natalie on Wednesday 7:00 pm".
+
+## Location, timezone and conversation summaries
+
+- During onboarding the browser's location (rounded to about 1 km) is turned into a timezone and country offline with `geo-tz`. Only the timezone and country are stored, never coordinates. Declining uses the device timezone. Changing it moves all reminders to the new zone.
+- **Conversation summaries** are opt-in (`conversation_summaries` consent). When a call ends, the transcript (kept only in the browser tab or the phone server's memory) is sent once to a small model with the recorded actions, and only the summary is stored. Sarah's part is replaced by "You had a private chat with Sarah" unless the person opts in. Summaries are only shown to the person, never to companions or clinicians, and can be deleted.
+
 ## Health, wellbeing and care sharing
 
-- **Check-ins** (`habit_events`) are always `patient_reported` with a certainty level; numbers are stored only when the person gave one. A correction is a new row (`corrected_from`), and the original is kept but superseded. Logging requires the `health_data_processing` consent.
+- **Other check-ins** (`habit_events`, under Goals → Other check-ins) are always `patient_reported` with a certainty level; numbers are stored only when the person gave one. A correction is a new row (`corrected_from`), and the original is kept but superseded. Logging requires the `health_data_processing` consent.
 - **Iris** (`lib/insights/iris.ts`) is deterministic, not generative: weekly goal counts, reported averages, co-occurring reports labelled as hypotheses, and missing data. Every statement lists its source record ids.
 - **Theo** plan changes are stored as `plan_proposals` and applied only through `confirm_action`; clinician-approved goals can't be changed.
 - **Sarah's notes** (`wellbeing_notes`) need the `sensitive_wellbeing` consent, are readable only by Sarah's tools and the person, expire after 30 days, and are never included in reports.
@@ -80,6 +94,8 @@ The scheduler only runs when `SCHEDULER_ENABLED=true`, so starting the server an
 - **Privacy & data:** per-purpose permissions, note deletion, JSON export (`/api/me/export`) and permanent account deletion (everything cascades from the auth identity).
 
 ## Known MVP shortcuts
+
+- **Database location:** the Supabase project is in Seoul. From Adelaide each query takes about 260 ms, so actions that make many queries (e.g. moving a goal-linked reminder, about 20 round trips) take 5–10 s. Moving the project to Sydney should bring these under a second.
 
 - **Email:** uses Supabase's built-in email service (only delivers to Supabase team members, heavily rate-limited). Production needs custom SMTP (e.g. Resend) with a verified domain — a Supabase settings change only.
 - **Safety contacts** in `lib/safety/contacts.ts` are placeholders pending clinical and legal review.

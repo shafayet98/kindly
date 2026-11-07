@@ -37,10 +37,13 @@ test("sign-up enforces the password policy before contacting Supabase (AC-31)", 
 test("returning patient goes straight to the dashboard and can sign out (AC-22, AC-27)", async ({ page }) => {
   await signIn(page, "demo.patient@example.com");
   await expect(page).toHaveURL(/\/dashboard$/);
-  for (const action of ["Talk now", "Change reminders", "View progress"]) {
-    await expect(page.getByRole("link", { name: new RegExp(action) })).toBeVisible();
+  for (const action of ["Talk now", "Progress"]) {
+    await expect(page.getByRole("region", { name: "Main actions" }).getByRole("link", { name: new RegExp(action) })).toBeVisible();
   }
-  await expect(page.getByRole("link", { name: "I'm feeling unwell" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your week" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your companions" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Feeling unwell?" })).toBeVisible();
+  await expect(page.getByText("What do you need today?")).toHaveCount(0);
   await signOut(page);
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/login/);
