@@ -1,32 +1,38 @@
-import Link from "next/link";
-import { Wordmark } from "@/components/brand";
 import { signOut } from "@/app/(auth)/actions";
+import { NavLinks } from "@/components/layout/nav-links";
+import { Brand, Footer } from "@/components/kindly/parts";
 
 export default function ClinicianLayout({ children }: LayoutProps<"/">) {
   return (
     <>
-      <header className="border-b border-border bg-surface">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <div className="flex items-center gap-3">
-            <Wordmark href="/clinician/patients" />
-            <span className="rounded-full bg-accent-soft px-3 py-1 text-sm font-bold">Clinician portal</span>
+      <header className="header">
+        <div className="wrap header__inner">
+          <div className="row" style={{ gap: 12 }}>
+            <Brand href="/clinician/patients" />
+            <span className="badge-portal">CLINICIAN PORTAL</span>
           </div>
-          <nav aria-label="Clinician" className="flex items-center gap-1">
-            <Link href="/clinician/patients" className="rounded-full px-3 py-2 font-semibold text-muted hover:bg-primary-soft">
-              Patients
-            </Link>
-            <Link href="/clinician/tasks" className="rounded-full px-3 py-2 font-semibold text-muted hover:bg-primary-soft">
-              Tasks
-            </Link>
+          <div className="header__end">
+            <NavLinks
+              label="Clinician"
+              items={[
+                { href: "/clinician/patients", label: "Patients", match: ["/clinician/patients", "/clinician/reports"] },
+                { href: "/clinician/tasks", label: "Tasks" },
+              ]}
+            />
             <form action={signOut}>
-              <button type="submit" className="rounded-full px-3 py-2 font-semibold text-muted hover:bg-primary-soft">
+              <button type="submit" className="btn btn--link">
                 Sign out
               </button>
             </form>
-          </nav>
+          </div>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{children}</main>
+      <main id="main" className="page">
+        <div className="wrap">{children}</div>
+      </main>
+      <Footer lead="Clinician portal.">
+        Kindly reports are prepared by an AI from what each patient records and chooses to share. They are not a clinical assessment.
+      </Footer>
     </>
   );
 }

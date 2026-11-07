@@ -51,7 +51,7 @@ export async function signUp(_prev: FormState, formData: FormData): Promise<Form
   return {
     status: "success",
     email: parsed.data.email,
-    message: "Check your inbox. If this email can be used, we've sent a link to confirm your account.",
+    message: "If this email can be used, we've sent it a confirmation link. Open it to finish creating your account.",
   };
 }
 

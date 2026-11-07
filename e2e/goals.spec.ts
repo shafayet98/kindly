@@ -25,7 +25,7 @@ test("a goal typed in plain words gets a category and shows on the calendar with
   await add.getByRole("button", { name: "Save goal" }).click();
   await expect(page.getByText("Goal saved.")).toBeVisible();
 
-  const goal = page.getByRole("listitem").filter({ hasText: /Swim/ });
+  const goal = page.getByRole("article").filter({ hasText: /Swim/ });
   await expect(goal).toContainText("Tue, Sat · 7:30 AM");
   await expect(goal).toContainText("In-app reminder at 7:30 AM");
   const [row] = await db.execute<{ category: string; cadence: string; target_count: number }>(sql`select category, cadence, target_count from goals where user_id = ${await alexId()} and title ilike '%swim%'`);
@@ -38,7 +38,7 @@ test("a goal typed in plain words gets a category and shows on the calendar with
 test("calendar sessions can be marked done, moved just once, and undone", async ({ page }) => {
   await signIn(page, "demo.patient@example.com");
   await expect(page).toHaveURL(/\/dashboard$/);
-  const today = page.getByRole("listitem").filter({ hasText: "Today" });
+  const today = page.locator('li[aria-current="date"]');
   const tablet = today.getByRole("button", { name: /Take blood pressure tablet/ }).first();
   await expect(tablet).toContainText("Planned");
 
@@ -48,7 +48,7 @@ test("calendar sessions can be marked done, moved just once, and undone", async 
   await expect(dialog).toContainText("Medication");
   await expect(dialog).toContainText("Every day · 8:00 AM");
   await expect(dialog).toContainText("In the app at 8:00 AM");
-  await dialog.getByRole("button", { name: "✓ Mark done" }).click();
+  await dialog.getByRole("button", { name: "Mark done" }).click();
   await expect(page.getByText("Marked as done.")).toBeVisible();
   await expect(tablet).toContainText("Done");
 
@@ -115,13 +115,13 @@ test("conversation summaries are shown only to the person and can be deleted", a
   await expect(page).toHaveURL(/\/dashboard$/);
   await page.goto("/activity");
   const sunday = page.getByRole("region").filter({ hasText: "You agreed to shorter walks" });
-  await expect(sunday).toContainText("Summary (only you can see this)");
+  await expect(sunday).toContainText("Only you can see this");
   await sunday.getByRole("button", { name: "Delete summary" }).click();
   await expect(page.getByText("You agreed to shorter walks")).toHaveCount(0);
 
   await page.goto("/settings/privacy");
   await expect(page.getByText("Include chats with Sarah in summaries")).toBeVisible();
-  await page.getByRole("button", { name: "Turn off: Conversation summaries" }).click();
+  await page.getByRole("switch", { name: "Conversation summaries" }).uncheck({ force: true });
   await expect(page.getByText("Include chats with Sarah in summaries")).toHaveCount(0);
   await page.goto("/activity");
   await expect(page.getByText("Conversation summaries are off.")).toBeVisible();

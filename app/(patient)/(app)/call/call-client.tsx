@@ -2,6 +2,7 @@
 
 import { RealtimeSession, type RealtimeItem } from "@openai/agents/realtime";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AiTag, Avatar, Icon } from "@/components/kindly/parts";
 import { Button } from "@/components/ui/button";
 import { AGENTS } from "@/lib/agents/directory";
 import type { ToolName } from "@/lib/agents/tools/specs";
@@ -21,11 +22,7 @@ type Caption = { id: string; who: string; text: string };
 
 const MAX_CALL_MS = 10 * 60_000;
 
-const AGENT_STYLE: Record<VoiceAgentKey, string> = {
-  milo: "bg-primary",
-  natalie: "bg-accent",
-  sarah: "bg-[#7c6fb0]",
-};
+const THINGS_TO_SAY = ["Move my walk to 5 PM", "I did my walk", "Put me through to Sarah"];
 
 const ERRORS: Record<string, string> = {
   consent_required: "Please allow browser voice first.",
@@ -49,6 +46,7 @@ export function CallClient({ startAgent, topic }: { startAgent: VoiceAgentKey; t
   const [captions, setCaptions] = useState<Caption[]>([]);
   const [safetyMessage, setSafetyMessage] = useState<string | null>(null);
   const [typed, setTyped] = useState("");
+  const [joined, setJoined] = useState<{ agent: VoiceAgentKey; at: Date }[]>([]);
 
   const sessionRef = useRef<RealtimeSession | null>(null);
   const sessionIdRef = useRef<string | null>(null);
@@ -92,6 +90,7 @@ export function CallClient({ startAgent, topic }: { startAgent: VoiceAgentKey; t
     setActive(startAgent);
     activeRef.current = startAgent;
     transcriptRef.current = new Map();
+    setJoined([{ agent: startAgent, at: new Date() }]);
     setStatus("connecting");
 
     const response = await postJson("/api/voice/session", { agent: startAgent, topic });
@@ -135,6 +134,7 @@ export function CallClient({ startAgent, topic }: { startAgent: VoiceAgentKey; t
       if (crossesPrivacyBoundary(from, to)) session.updateHistory(pruneForHandoff);
       setActive(to);
       activeRef.current = to;
+      setJoined((current) => [...current, { agent: to, at: new Date() }]);
       setSwitchingTo(to);
       setCaptions([]);
       void postJson("/api/voice/events", { type: "handoff", sessionId, from, to, via: uiSwitchRef.current ? "ui" : "voice" });
@@ -161,7 +161,6 @@ export function CallClient({ startAgent, topic }: { startAgent: VoiceAgentKey; t
       }
     });
     session.on("history_updated", (history) => {
-      setCaptions(toCaptions(history));
       for (const item of history) {
         if (item.type !== "message" || item.role === "system") continue;
         const text = messageText(item);
@@ -169,6 +168,7 @@ export function CallClient({ startAgent, topic }: { startAgent: VoiceAgentKey; t
         const known = transcriptRef.current.get(item.itemId);
         transcriptRef.current.set(item.itemId, { agent: known?.agent ?? activeRef.current, role: item.role, text });
       }
+      setCaptions(toCaptions(history, transcriptRef.current));
     });
     // Non-fatal API errors (e.g. cancelling a response that already finished) don't end the call;
     // a dropped connection is handled below.
@@ -217,113 +217,181 @@ export function CallClient({ startAgent, topic }: { startAgent: VoiceAgentKey; t
 
   const agent = AGENTS[active];
   const live = status === "live";
+  const statusText =
+    status === "idle"
+      ? "Ready when you are"
+      : status === "connecting"
+        ? "Connecting…"
+        : live
+          ? switchingTo
+            ? `Connecting to ${AGENTS[switchingTo].name}…`
+            : speaking
+              ? `${agent.name} is speaking`
+              : "Listening"
+          : status === "ended"
+            ? "Call ended"
+            : "Couldn't start the call";
+  const timeOf = (date: Date) => new Intl.DateTimeFormat("en-AU", { hour: "numeric", minute: "2-digit" }).format(date);
 
   return (
-    <div className="mx-auto flex max-w-xl flex-col items-center gap-6 text-center">
-      {safetyMessage && (
-        <div role="alert" className="w-full rounded-2xl border-2 border-danger/40 bg-danger-soft p-4 text-left">
-          <p className="font-bold text-danger">If you are in danger, call {SAFETY_CONTACTS.emergency.number} now.</p>
-          <p className="mt-1">{safetyMessage}</p>
-        </div>
-      )}
-
-      <div className="relative mt-4">
-        <div
-          aria-hidden
-          className={`grid h-36 w-36 place-items-center rounded-full text-6xl font-extrabold text-white ${AGENT_STYLE[active]} ${
-            speaking ? "ring-8 ring-primary/20 motion-safe:animate-pulse" : ""
-          }`}
-        >
-          {agent.name[0]}
-        </div>
-      </div>
-
-      <div aria-live="polite">
-        <h1 className="text-3xl font-bold">{agent.name}</h1>
-        <p className="text-muted">
-          {agent.role} · AI companion
-        </p>
-        <p className="mt-2 font-semibold">
-          {status === "idle" && "Ready when you are"}
-          {status === "connecting" && "Connecting…"}
-          {live && (switchingTo ? `Connecting to ${AGENTS[switchingTo].name}…` : speaking ? `${agent.name} is speaking` : "Listening")}
-          {status === "ended" && "Call ended"}
-          {status === "error" && "Couldn't start the call"}
-        </p>
-      </div>
-
-      {error && (
-        <p role="alert" className="rounded-xl bg-danger-soft px-4 py-3 text-danger">
-          {error}
-        </p>
-      )}
-
-      {!live && status !== "connecting" && (
-        <Button onClick={startCall} className="px-8 py-4 text-lg">
-          {status === "idle" ? `Start talking to ${AGENTS[startAgent].name}` : "Start a new call"}
-        </Button>
-      )}
-
-      {live && (
-        <>
-          <div className="flex flex-wrap justify-center gap-3">
-            <Button variant="secondary" onClick={toggleMute} aria-pressed={muted}>
-              {muted ? "Unmute" : "Mute"}
-            </Button>
-            <Button onClick={() => endCall()} className="bg-danger hover:bg-danger/90">
-              End call
-            </Button>
+    <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="stage" style={live ? undefined : { padding: "72px 56px" }}>
+        {safetyMessage && (
+          <div className="emergency" role="alert" style={{ width: "100%", maxWidth: 760, textAlign: "left" }}>
+            <Icon name="alert" />
+            <p className="emergency__text">
+              If this could be an emergency, call {SAFETY_CONTACTS.emergency.number} now.
+              <span>{safetyMessage}</span>
+            </p>
+            <a className="btn" href={`tel:${SAFETY_CONTACTS.emergency.number}`}>
+              <Icon name="phone" />
+              Call {SAFETY_CONTACTS.emergency.number}
+            </a>
           </div>
+        )}
 
-          <div className="flex flex-col items-center gap-2">
-            <p className="text-sm text-muted">Switch companion (or just ask out loud)</p>
-            <div className="flex flex-wrap justify-center gap-2">
-              {VOICE_AGENT_KEYS.filter((key) => key !== active).map((key) => (
-                <Button key={key} variant="secondary" onClick={() => switchTo(key)} disabled={switchingTo !== null}>
-                  Talk to {AGENTS[key].name}
-                </Button>
-              ))}
+        <div className={live && speaking ? "ring" : undefined}>
+          <Avatar agent={active} size="xl" />
+        </div>
+        <div className="stack" style={{ gap: 6 }}>
+          <h1 className="headline">{agent.name}</h1>
+          <p className="companion__role">{agent.role} · AI companion</p>
+        </div>
+        <p className="stage-status" role="status" aria-live="polite">
+          {live && speaking && !switchingTo ? (
+            <span className="speaking" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+              <span />
+            </span>
+          ) : (
+            <Icon name={live ? "mic" : status === "error" ? "alert" : "check"} className="icon--sm" />
+          )}
+          {statusText}
+        </p>
+
+        {error && (
+          <p role="alert" className="notice notice--error" style={{ textAlign: "left", maxWidth: 560 }}>
+            <Icon name="alert" />
+            <span>{error}</span>
+          </p>
+        )}
+
+        {!live && (
+          <Button variant="highlight" size="lg" onClick={startCall} disabled={status === "connecting"} aria-busy={status === "connecting" || undefined} style={{ minWidth: 280 }}>
+            <Icon name="mic" />
+            {status === "idle" || status === "connecting" ? `Start talking to ${AGENTS[startAgent].name}` : "Start a new call"}
+          </Button>
+        )}
+
+        {live && (
+          <>
+            <div className="row" style={{ justifyContent: "center", gap: 12 }}>
+              <Button variant="ghost" size="lg" onClick={toggleMute} aria-pressed={muted}>
+                <Icon name="mic" />
+                {muted ? "Unmute" : "Mute"}
+              </Button>
+              <Button variant="danger" size="lg" onClick={() => endCall()}>
+                <Icon name="phone" />
+                End call
+              </Button>
             </div>
+
+            <div className="stack" style={{ gap: 10, marginTop: 8 }}>
+              <p className="muted small">Switch companion (or just ask out loud)</p>
+              <div className="switcher">
+                {VOICE_AGENT_KEYS.filter((key) => key !== active).map((key) => (
+                  <Button key={key} variant="ghost" onClick={() => switchTo(key)} disabled={switchingTo !== null}>
+                    <Avatar agent={key} />
+                    Talk to {AGENTS[key].name}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            <form onSubmit={sendTyped} className="row nowrap" style={{ width: "100%", maxWidth: 640, marginTop: 8 }}>
+              <label htmlFor="typed" className="sr-only">
+                Type instead of speaking
+              </label>
+              <input id="typed" className="input" value={typed} onChange={(event) => setTyped(event.target.value)} placeholder="Type instead of speaking…" />
+              <Button type="submit" variant="ghost">
+                Send
+              </Button>
+            </form>
+
+            <div className="captions" aria-live="polite">
+              <label className="row" style={{ gap: 10, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={showCaptions}
+                  onChange={(event) => setShowCaptions(event.target.checked)}
+                  style={{ width: 20, height: 20, accentColor: "var(--ember)" }}
+                />
+                Show captions <span className="muted small">(not saved)</span>
+              </label>
+              {showCaptions && captions.length === 0 && <p className="muted small">Captions will appear here.</p>}
+              {showCaptions &&
+                captions.map((caption) => (
+                  <p key={caption.id}>
+                    <span className="who">{caption.who}</span>
+                    {caption.text}
+                  </p>
+                ))}
+            </div>
+          </>
+        )}
+
+        <p className="muted small" style={{ maxWidth: 520 }}>
+          Audio isn&apos;t recorded. Kindly&apos;s companions are AI and can make mistakes. In an emergency call {SAFETY_CONTACTS.emergency.number}.
+        </p>
+      </div>
+
+      {live || status === "ended" ? (
+        <div className="stack-24">
+          <div className="card stack">
+            <p className="title">{live ? "In this call" : "Last call"}</p>
+            {joined.map((entry, index) => (
+              <div key={index} className="companion" style={{ alignItems: "center" }}>
+                <Avatar agent={entry.agent} size="sm" />
+                <span>
+                  <span style={{ fontWeight: 500 }}>{AGENTS[entry.agent].name}</span> <span className="muted small">· joined {timeOf(entry.at)}</span>
+                </span>
+              </div>
+            ))}
+            <p className="muted small">Changes are saved only after you say yes.</p>
           </div>
-
-          <form onSubmit={sendTyped} className="flex w-full gap-2">
-            <label htmlFor="typed" className="sr-only">
-              Type a message instead
-            </label>
-            <input
-              id="typed"
-              value={typed}
-              onChange={(event) => setTyped(event.target.value)}
-              placeholder="Type instead of speaking…"
-              className="flex-1 rounded-full border border-border bg-surface px-4 py-3"
-            />
-            <Button type="submit" variant="secondary">
-              Send
-            </Button>
-          </form>
-
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={showCaptions} onChange={(event) => setShowCaptions(event.target.checked)} className="h-4 w-4 accent-primary" />
-            Show captions (not saved)
-          </label>
-          {showCaptions && (
-            <ol className="flex max-h-72 w-full flex-col gap-2 overflow-y-auto rounded-2xl border border-border bg-surface p-4 text-left">
-              {captions.length === 0 && <li className="text-muted">Captions will appear here.</li>}
-              {captions.map((caption) => (
-                <li key={caption.id}>
-                  <span className="font-bold">{caption.who}: </span>
-                  {caption.text}
+          <div className="notice notice--info">
+            <Icon name="lock" />
+            <p>Audio isn&apos;t recorded. Captions disappear when the call ends.</p>
+          </div>
+        </div>
+      ) : (
+        <div className="stack-24">
+          <div className="card stack">
+            <p className="title">Things you can say</p>
+            <ul className="stack">
+              {THINGS_TO_SAY.map((line) => (
+                <li key={line} className="quote">
+                  “{line}”
                 </li>
               ))}
-            </ol>
-          )}
-        </>
+            </ul>
+          </div>
+          <div className="card stack">
+            <p className="title">Who can join</p>
+            {VOICE_AGENT_KEYS.map((key) => (
+              <div key={key} className="companion" style={{ alignItems: "center" }}>
+                <Avatar agent={key} size="sm" />
+                <span>
+                  <span style={{ fontWeight: 500 }}>{AGENTS[key].name}</span> <AiTag /> <span className="muted small">· {AGENTS[key].role}</span>
+                </span>
+              </div>
+            ))}
+            <p className="muted small">Ask for anyone out loud — they&apos;ll join without hanging up.</p>
+          </div>
+        </div>
       )}
-
-      <p className="text-sm text-muted">
-        Audio isn&apos;t recorded. Kindly&apos;s companions are AI and can make mistakes. In an emergency call{" "}
-        {SAFETY_CONTACTS.emergency.number}.
-      </p>
     </div>
   );
 }
@@ -335,12 +403,13 @@ function messageText(item: Extract<RealtimeItem, { type: "message" }>) {
     .trim();
 }
 
-function toCaptions(history: RealtimeItem[]): Caption[] {
+function toCaptions(history: RealtimeItem[], speakers: Map<string, { agent: VoiceAgentKey }>): Caption[] {
   const captions: Caption[] = [];
   for (const item of history) {
     if (item.type !== "message" || item.role === "system") continue;
     const text = messageText(item);
-    if (text) captions.push({ id: item.itemId, who: item.role === "user" ? "You" : "Kindly", text });
+    const agent = speakers.get(item.itemId)?.agent;
+    if (text) captions.push({ id: item.itemId, who: item.role === "user" ? "YOU" : agent ? AGENTS[agent].name.toUpperCase() : "KINDLY", text });
   }
   return captions.slice(-20);
 }

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { AiTag, Avatar, Icon, PageHead } from "@/components/kindly/parts";
+import { ButtonLink } from "@/components/ui/button";
 import { AGENTS } from "@/lib/agents/directory";
 import { requireOnboardedPatient } from "@/lib/auth/session";
 
@@ -7,32 +8,68 @@ export const metadata: Metadata = { title: "Meet the team" };
 
 export default async function AgentsPage() {
   await requireOnboardedPatient();
+  const live = Object.values(AGENTS).filter((agent) => agent.live);
+  const helpers = Object.values(AGENTS).filter((agent) => !agent.live);
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-3xl font-bold">Meet the team</h1>
-        <p className="text-muted">
-          Six AI companions who work together. None of them are human or clinicians, and each one only sees what it needs.
-        </p>
-      </div>
-      <ul className="grid gap-4 sm:grid-cols-2">
-        {Object.values(AGENTS).map((agent) => (
-          <li key={agent.key} className="flex flex-col gap-2 rounded-3xl border border-border bg-surface p-5">
-            <p className="text-xl font-bold">
-              {agent.name} <span className="text-base font-normal text-muted">· {agent.role}</span>
-            </p>
-            <p>{agent.helpsWith}</p>
-            <p className="text-sm text-muted">{agent.limits}</p>
-            {agent.live ? (
-              <Link href={`/call?agent=${agent.key}`} className="mt-auto font-semibold text-primary underline-offset-4 hover:underline">
+    <>
+      <PageHead title="Meet the team" sub="Six AI companions who work together. None of them are human or clinicians, and each one only sees what it needs." />
+      <section className="stack-24" aria-labelledby="live-h">
+        <h2 id="live-h" className="label">
+          YOU CAN TALK TO
+        </h2>
+        <div className="grid-3">
+          {live.map((agent) => (
+            <article key={agent.key} className="card card--lg stack-24" style={{ display: "flex", flexDirection: "column" }}>
+              <div className="companion" style={{ alignItems: "center" }}>
+                <Avatar agent={agent.key} size="lg" />
+                <div>
+                  <h3 className="subhead">
+                    {agent.name} <AiTag />
+                  </h3>
+                  <p className="companion__role" style={{ marginTop: 6 }}>
+                    {agent.role}
+                  </p>
+                </div>
+              </div>
+              <p className="body-lg">{agent.helpsWith}</p>
+              <p className="row nowrap top muted small" style={{ gap: 10 }}>
+                <Icon name="shield" className="icon--sm" />
+                <span>{agent.limits}</span>
+              </p>
+              <ButtonLink variant={agent.key === "natalie" ? "primary" : "ghost"} href={`/call?agent=${agent.key}`} style={{ marginTop: "auto", alignSelf: "flex-start" }}>
+                <Icon name="mic" className="icon--sm" />
                 Talk to {agent.name}
-              </Link>
-            ) : (
-              <p className="mt-auto text-sm text-muted">Works behind the scenes when another companion asks.</p>
-            )}
-          </li>
-        ))}
-      </ul>
-    </div>
+              </ButtonLink>
+            </article>
+          ))}
+        </div>
+      </section>
+      <section className="stack-24" style={{ marginTop: 56 }} aria-labelledby="behind-h">
+        <h2 id="behind-h" className="label">
+          BEHIND THE SCENES
+        </h2>
+        <div className="grid-3">
+          {helpers.map((agent) => (
+            <article key={agent.key} className="card stack" style={{ background: "var(--surface)" }}>
+              <div className="companion" style={{ alignItems: "center" }}>
+                <Avatar agent={agent.key} />
+                <div>
+                  <h3 className="title">
+                    {agent.name} <AiTag />
+                  </h3>
+                  <p className="companion__role">{agent.role}</p>
+                </div>
+              </div>
+              <p>{agent.helpsWith}</p>
+              <p className="row nowrap top muted small" style={{ gap: 10 }}>
+                <Icon name="shield" className="icon--sm" />
+                <span>{agent.limits}</span>
+              </p>
+              <p className="label">Works behind the scenes when another companion asks.</p>
+            </article>
+          ))}
+        </div>
+      </section>
+    </>
   );
 }

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { and, asc, eq, ne } from "drizzle-orm";
+import { Chip, Empty, Icon, PageHead, PanelSummary } from "@/components/kindly/parts";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { AGENTS } from "@/lib/agents/directory";
 import { requireOnboardedPatient } from "@/lib/auth/session";
@@ -27,6 +28,19 @@ const STATUS_LABEL: Record<string, string> = {
   failed: "Failed",
   cancelled: "Cancelled",
   skipped: "Skipped",
+};
+// How each call status looks: chip tone and icon.
+const STATUS_LOOK: Record<string, { tone: "ok" | "warn" | "live" | "done" | "planned" | "notdone" | "moved"; icon: "check" | "dash" | "clock" | "phone" | "alert" }> = {
+  scheduled: { tone: "planned", icon: "clock" },
+  dialing: { tone: "live", icon: "phone" },
+  ringing: { tone: "live", icon: "phone" },
+  in_progress: { tone: "live", icon: "phone" },
+  completed: { tone: "done", icon: "check" },
+  no_answer: { tone: "notdone", icon: "dash" },
+  busy: { tone: "notdone", icon: "dash" },
+  failed: { tone: "warn", icon: "alert" },
+  cancelled: { tone: "notdone", icon: "dash" },
+  skipped: { tone: "notdone", icon: "dash" },
 };
 const ACTIVE = new Set(["scheduled", "dialing", "ringing", "in_progress"]);
 
@@ -71,148 +85,205 @@ export default async function SchedulePage() {
   const paused = Boolean(settings?.pausedAt);
   const nextCallFor = new Map(upcoming.map((job) => [job.reminderId, job.dueAt]));
   const formatWhen = (date: Date) =>
-    new Intl.DateTimeFormat("en-AU", { timeZone: user.timezone, weekday: "short", hour: "numeric", minute: "2-digit" }).format(date);
+    new Intl.DateTimeFormat("en-AU", { timeZone: user.timezone, weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }).format(date);
+  const hourPart = (time: string) => formatTime12h(time).split(" ");
 
   return (
-    <div className="flex flex-col gap-8">
-      <div>
-        <h1 className="text-3xl font-bold">Your Daily Reminders</h1>
-        <p className="text-muted">
-          Times are in <strong>{zone.place} time ({zone.abbreviation})</strong>
-          {zone.country ? `, ${zone.country}` : ""}.{" "}
-          <Link href="/settings/location" className="font-semibold text-primary underline-offset-4 hover:underline">
-            Change
-          </Link>
-        </p>
-        <p className="text-muted">You can also ask Milo or Natalie to change these. Reminders for a goal follow the goal&apos;s time.</p>
-      </div>
-
-      <section aria-labelledby="reminders-heading" className="flex flex-col gap-3">
-        <h2 id="reminders-heading" className="text-xl font-bold">
-          Your reminders
-        </h2>
-        {reminders.length === 0 && <p className="text-muted">No reminders yet.</p>}
-        <ul className="flex flex-col gap-3">
-          {reminders.map((reminder) => {
-            const next = nextCallFor.get(reminder.id);
-            return (
-              <li key={reminder.id} className="rounded-2xl border border-border bg-surface p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-lg font-bold">
-                      {reminder.title}
-                      {reminder.status === "paused" && <span className="ml-2 rounded-full bg-accent-soft px-2 py-0.5 text-sm">Paused</span>}
-                    </p>
-                    <p>
-                      {formatTime12h(reminder.localTime)} · {formatDays(reminder.daysOfWeek)} ·{" "}
-                      {reminder.channel === "phone" ? "Phone call from Milo" : "In the app"}
-                    </p>
-                    {next && <p className="text-sm text-muted">Next call: {formatWhen(next)}</p>}
-                  </div>
-                  <div className="flex gap-2">
-                    <form action={changeReminderStatus}>
-                      <input type="hidden" name="id" value={reminder.id} />
-                      <input type="hidden" name="status" value={reminder.status === "paused" ? "active" : "paused"} />
-                      <SubmitButton variant="secondary">{reminder.status === "paused" ? "Resume" : "Pause"}</SubmitButton>
-                    </form>
-                    <form action={changeReminderStatus}>
-                      <input type="hidden" name="id" value={reminder.id} />
-                      <input type="hidden" name="status" value="cancelled" />
-                      <SubmitButton variant="ghost" aria-label={`Delete ${reminder.title}`}>
-                        Delete
-                      </SubmitButton>
-                    </form>
-                  </div>
-                </div>
-                <details className="mt-2">
-                  <summary className="cursor-pointer font-semibold text-primary">Change time or days</summary>
-                  <EditReminderForm id={reminder.id} localTime={reminder.localTime} daysOfWeek={reminder.daysOfWeek} />
-                </details>
-              </li>
-            );
-          })}
-        </ul>
-        <details className="rounded-2xl border border-dashed border-border p-4">
-          <summary className="cursor-pointer font-bold text-primary">Add a reminder</summary>
-          <div className="mt-4">
-            <AddReminderForm phoneAllowed={callsOn} />
+    <>
+      <PageHead title="Your Daily Reminders" sub="You can also ask Milo or Natalie to change these. Reminders for a goal follow the goal's time." />
+      <div className="split" style={{ gridTemplateColumns: "minmax(0,1fr) 440px" }}>
+        <div className="stack-32">
+          <div className="card row nowrap" style={{ gap: 14, padding: "16px 20px" }}>
+            <span className="cat-icon cat-icon--sm">
+              <Icon name="pin" />
+            </span>
+            <span>
+              Times are in{" "}
+              <strong style={{ fontWeight: 600 }}>
+                {zone.place} time ({zone.abbreviation})
+              </strong>
+              {zone.country ? `, ${zone.country}` : ""}.
+            </span>
+            <Link className="link" href="/settings/location" style={{ marginLeft: "auto" }}>
+              Change
+            </Link>
           </div>
-        </details>
-      </section>
 
-      <section aria-labelledby="calls-heading" className="flex flex-col gap-4 rounded-3xl border border-border bg-surface p-5">
-        <h2 id="calls-heading" className="text-xl font-bold">
-          Phone calls
-        </h2>
-        {!callsOn ? (
-          <>
-            <p>
-              Milo can call your phone at the times you choose, even when this website is closed. Calls are off until you
-              turn them on.
-            </p>
-            <TurnOnCallsForm phone={settings?.phoneE164 ?? null} />
-          </>
-        ) : (
-          <>
-            <p>
-              Calls go to <strong>{maskPhone(settings!.phoneE164!)}</strong>.{" "}
-              {paused ? <strong className="text-danger">All calls are paused.</strong> : "Calls are on."}
-            </p>
-            <div className="flex flex-wrap gap-3">
-              <form action={togglePause}>
-                <input type="hidden" name="pause" value={paused ? "false" : "true"} />
-                <SubmitButton variant={paused ? "primary" : "secondary"}>{paused ? "Resume calls" : "Pause all calls"}</SubmitButton>
-              </form>
-              <CallMeNowButton disabled={paused} />
-            </div>
-            <details>
-              <summary className="cursor-pointer font-semibold text-primary">Quiet hours and limits</summary>
-              <div className="mt-3">
-                <CallLimitsForm
-                  quietHoursStart={settings!.quietHoursStart!}
-                  quietHoursEnd={settings!.quietHoursEnd!}
-                  maxCallsPerDay={settings!.maxCallsPerDay!}
-                  maxRetries={settings!.maxRetries!}
-                  retryDelayMinutes={settings!.retryDelayMinutes!}
-                />
+          <section className="stack" aria-labelledby="yr-h">
+            <h2 id="yr-h" className="subhead" style={{ marginBottom: 8 }}>
+              Your reminders
+            </h2>
+            {reminders.length === 0 && <p className="muted">No reminders yet.</p>}
+            <ul className="stack">
+              {reminders.map((reminder) => {
+                const next = nextCallFor.get(reminder.id);
+                return (
+                  <li key={reminder.id} className="card" style={{ padding: "22px 24px" }}>
+                    <div className="card-grid">
+                      <div style={{ textAlign: "center", minWidth: 84 }}>
+                        <p className="subhead">{hourPart(reminder.localTime)[0]}</p>
+                        <p className="label">{hourPart(reminder.localTime)[1]}</p>
+                      </div>
+                      <div>
+                        <h3 className="title">
+                          {reminder.title}
+                          {reminder.status === "paused" && (
+                            <span className="tag tag--soft" style={{ marginLeft: 8 }}>
+                              PAUSED
+                            </span>
+                          )}
+                        </h3>
+                        <p className="row" style={{ gap: 8, marginTop: 6 }}>
+                          {formatTime12h(reminder.localTime)} · {formatDays(reminder.daysOfWeek)} · <Icon name={reminder.channel === "phone" ? "phone" : "bell"} className="icon--sm" />
+                          {reminder.channel === "phone" ? "Phone call from Milo" : "In the app"}
+                        </p>
+                        {next && (
+                          <p className="label" style={{ marginTop: 8 }}>
+                            Next call: {formatWhen(next)}
+                          </p>
+                        )}
+                      </div>
+                      <div className="row" style={{ gap: 8 }}>
+                        <form action={changeReminderStatus}>
+                          <input type="hidden" name="id" value={reminder.id} />
+                          <input type="hidden" name="status" value={reminder.status === "paused" ? "active" : "paused"} />
+                          <SubmitButton variant="ghost" size="sm">
+                            {reminder.status === "paused" ? "Resume" : "Pause"}
+                          </SubmitButton>
+                        </form>
+                        <form action={changeReminderStatus}>
+                          <input type="hidden" name="id" value={reminder.id} />
+                          <input type="hidden" name="status" value="cancelled" />
+                          <SubmitButton variant="link" size="sm" className="link--danger" aria-label={`Delete ${reminder.title}`}>
+                            Delete
+                          </SubmitButton>
+                        </form>
+                      </div>
+                    </div>
+                    <details className="panel panel-sm dashed" style={{ marginTop: 16 }}>
+                      <PanelSummary icon="clock">Change time or days</PanelSummary>
+                      <div className="panel__body">
+                        <EditReminderForm id={reminder.id} localTime={reminder.localTime} daysOfWeek={reminder.daysOfWeek} />
+                      </div>
+                    </details>
+                  </li>
+                );
+              })}
+            </ul>
+            <details className="panel">
+              <PanelSummary icon="plus" accent>
+                Add a reminder
+              </PanelSummary>
+              <div className="panel__body">
+                <AddReminderForm phoneAllowed={callsOn} />
               </div>
             </details>
-            <form action={turnOffCalls}>
-              <SubmitButton variant="ghost">Turn off phone calls</SubmitButton>
-            </form>
-          </>
-        )}
-      </section>
-
-      <section aria-labelledby="activity-heading" className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-3">
-          <h2 id="activity-heading" className="text-xl font-bold">
-            Recent calls
-          </h2>
-          <LiveRefresh active={hasCallInFlight(calls)} />
+          </section>
         </div>
-        {calls.length === 0 ? (
-          <p className="text-muted">No calls yet.</p>
-        ) : (
-          <ul className="flex flex-col divide-y divide-border rounded-2xl border border-border bg-surface">
-            {calls.map((call) => (
-              <li key={call.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-                <span>
-                  <span className="font-semibold">{call.reminderTitle ?? "Call you asked for"}</span>
-                  <span className="text-muted"> · {formatWhen(call.dueAt)}</span>
-                </span>
-                <span className="text-sm">
-                  <span className="font-bold">{STATUS_LABEL[call.status] ?? call.status}</span>
-                  {call.status === "in_progress" && call.activeAgent && call.sessionState !== "ended" && ` · talking with ${AGENTS[call.activeAgent].name}`}
-                  {call.status === "skipped" && call.lastError && ` · ${SKIP_REASONS[call.lastError] ?? "not placed"}`}
-                  {call.status === "failed" && " · the call couldn't be placed"}
-                  {call.attempts > 1 && ` · ${call.attempts} attempts`}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </div>
+
+        <div className="stack-32">
+          <section className="card card--lg stack-24" aria-labelledby="pc-h">
+            <div className="row row--between">
+              <h2 id="pc-h" className="subhead">
+                Phone calls
+              </h2>
+              {!callsOn ? (
+                <Chip tone="notdone" icon="dash">
+                  Off
+                </Chip>
+              ) : paused ? (
+                <Chip tone="warn" icon="alert">
+                  Paused
+                </Chip>
+              ) : (
+                <Chip tone="ok" icon="check">
+                  Calls are on
+                </Chip>
+              )}
+            </div>
+            {!callsOn ? (
+              <>
+                <p className="muted">Milo can call your mobile at the times you choose, even when this website is closed. Nothing happens until you add your number and agree below.</p>
+                <TurnOnCallsForm phone={settings?.phoneE164 ?? null} />
+              </>
+            ) : (
+              <>
+                <div className="row nowrap" style={{ gap: 14 }}>
+                  <span className="cat-icon">
+                    <Icon name="phone" />
+                  </span>
+                  <p>
+                    Calls go to <strong style={{ fontWeight: 600, fontFamily: "var(--font-mono)" }}>{maskPhone(settings!.phoneE164!)}</strong>
+                    {paused && <span className="muted"> · all calls are paused</span>}
+                  </p>
+                </div>
+                <div className="row">
+                  <CallMeNowButton disabled={paused} />
+                  <form action={togglePause}>
+                    <input type="hidden" name="pause" value={paused ? "false" : "true"} />
+                    <SubmitButton variant={paused ? "primary" : "ghost"}>{paused ? "Resume calls" : "Pause all calls"}</SubmitButton>
+                  </form>
+                </div>
+                <details className="panel">
+                  <PanelSummary icon="clock">Quiet hours and limits</PanelSummary>
+                  <div className="panel__body">
+                    <CallLimitsForm
+                      quietHoursStart={settings!.quietHoursStart!}
+                      quietHoursEnd={settings!.quietHoursEnd!}
+                      maxCallsPerDay={settings!.maxCallsPerDay!}
+                      maxRetries={settings!.maxRetries!}
+                      retryDelayMinutes={settings!.retryDelayMinutes!}
+                    />
+                  </div>
+                </details>
+                <hr className="divider" />
+                <form action={turnOffCalls}>
+                  <SubmitButton variant="link" size="sm" className="link--danger" style={{ paddingLeft: 0 }}>
+                    Turn off phone calls
+                  </SubmitButton>
+                </form>
+              </>
+            )}
+          </section>
+
+          <section className="stack" aria-labelledby="rc-h">
+            <div className="row row--between">
+              <h2 id="rc-h" className="title">
+                Recent calls
+              </h2>
+              <LiveRefresh active={hasCallInFlight(calls)} />
+            </div>
+            {calls.length === 0 ? (
+              <Empty icon="phone" title="No calls yet">
+                <p className="muted small">Calls from Milo will show here with their status.</p>
+              </Empty>
+            ) : (
+              <ul className="rows">
+                {calls.map((call) => {
+                  const look = STATUS_LOOK[call.status] ?? STATUS_LOOK.scheduled;
+                  return (
+                    <li key={call.id}>
+                      <span>
+                        <span style={{ fontWeight: 500 }}>{call.reminderTitle ?? "Call you asked for"}</span>
+                        <span className="rows__sub" style={{ display: "block" }}>
+                          {formatWhen(call.dueAt)}
+                          {call.attempts > 1 ? ` · ${call.attempts} attempts` : ""}
+                          {call.status === "skipped" && call.lastError ? ` · ${SKIP_REASONS[call.lastError] ?? "not placed"}` : ""}
+                          {call.status === "failed" ? " · the call couldn't be placed" : ""}
+                        </span>
+                      </span>
+                      <Chip tone={look.tone} icon={look.icon}>
+                        {STATUS_LABEL[call.status] ?? call.status}
+                        {call.status === "in_progress" && call.activeAgent && call.sessionState !== "ended" ? ` · talking with ${AGENTS[call.activeAgent].name}` : ""}
+                      </Chip>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        </div>
+      </div>
+    </>
   );
 }

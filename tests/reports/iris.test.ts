@@ -104,4 +104,9 @@ describe("describeBasis", () => {
     const checkIn = { occurredAt: zonedTimeToUtc("2026-11-03", "07:00", TZ), sessionId: null, recordedByAgent: null };
     expect(describeBasis([checkIn], new Map(), TZ)).toBe("Based on check-ins added on Tue 3 Nov");
   });
+
+  it("summarises long runs of check-ins as a date range", () => {
+    const many = ["2026-10-12", "2026-10-13", "2026-10-20", "2026-11-06"].map((date) => ({ occurredAt: zonedTimeToUtc(date, "07:00", TZ), sessionId: null, recordedByAgent: null }));
+    expect(describeBasis(many, new Map(), TZ)).toBe("Based on check-ins added on 4 days between Mon 12 Oct and Fri 6 Nov");
+  });
 });

@@ -84,7 +84,7 @@ export async function turnOnCalls(_prev: ScheduleState, formData: FormData): Pro
   const phone = normalizePhone(String(formData.get("phone") ?? ""));
   const values = submitted(formData, ["phone"]);
   if (!phone) return { status: "error", message: "Enter a valid mobile number, like 0412 345 678.", values };
-  if (formData.get("agree") !== "on") return { status: "error", message: "Please confirm this is your number and that Kindly may call it.", values };
+  if (formData.get("agree") !== "on") return { status: "error", message: "Please tick the box to confirm this is your number and that Kindly may call it.", values };
   await enablePhoneCalls(user.id, phone);
   return done("Phone calls are on.");
 }

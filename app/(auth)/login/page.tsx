@@ -20,20 +20,22 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   const noticeText = typeof notice === "string" ? NOTICES[notice] : undefined;
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold">Welcome back</h1>
-        <p className="text-muted">Sign in to talk with your Kindly companions.</p>
+    <div className="stack-32">
+      <div className="stack">
+        <h1 className="headline">Welcome back</h1>
+        <p className="body-lg muted">Sign in to talk with your Kindly companions.</p>
       </div>
       {noticeText && <Notice>{noticeText}</Notice>}
       <LoginForm next={typeof next === "string" ? next : undefined} />
-      <div className="flex flex-col gap-2 text-center">
-        <Link href="/forgot-password" className="text-primary underline-offset-4 hover:underline">
-          Forgot password?
-        </Link>
-        <p className="text-muted">
+      <div className="stack" style={{ textAlign: "center" }}>
+        <p>
+          <Link className="link" href="/forgot-password">
+            Forgot password?
+          </Link>
+        </p>
+        <p className="muted">
           New to Kindly?{" "}
-          <Link href="/signup" className="font-semibold text-primary underline-offset-4 hover:underline">
+          <Link className="link" href="/signup">
             Create account
           </Link>
         </p>

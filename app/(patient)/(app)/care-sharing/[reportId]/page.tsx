@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
+import { BackLink, Chip, PageHead, PersonAvatar } from "@/components/kindly/parts";
 import { ReportView } from "@/components/reports/report-view";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { requireOnboardedPatient } from "@/lib/auth/session";
@@ -25,46 +25,53 @@ export default async function ReportPreviewPage({ params }: PageProps<"/care-sha
   const when = (date: Date) => new Intl.DateTimeFormat("en-AU", { dateStyle: "medium", timeStyle: "short", timeZone: user.timezone }).format(date);
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-8">
-      <div>
-        <Link href="/care-sharing" className="text-sm font-semibold text-primary underline-offset-4 hover:underline">
-          ← Care sharing
-        </Link>
-        <h1 className="mt-2 text-3xl font-bold">Report preview</h1>
-        <p className="text-muted">This is exactly what a clinician would see.</p>
-      </div>
-
-      <div className="rounded-3xl border border-border bg-surface p-5">
+    <>
+      <BackLink href="/care-sharing">Care sharing</BackLink>
+      <PageHead title="Report preview" sub="This is exactly what a clinician would see." />
+      <div className="split" style={{ gridTemplateColumns: "minmax(0,1fr) 400px" }}>
         <ReportView content={report.content as ReportContent} />
-      </div>
-
-      <section aria-labelledby="sharing-heading" className="flex flex-col gap-3">
-        <h2 id="sharing-heading" className="text-xl font-bold">
-          Sharing
-        </h2>
-        {activeShares.length > 0 && (
-          <ul className="flex flex-col gap-2">
+        <aside className="sticky">
+          <section className="card card--lg stack-24" aria-labelledby="sh-h">
+            <h2 id="sh-h" className="subhead">
+              Sharing
+            </h2>
             {activeShares.map((share) => (
-              <li key={share.id} className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border bg-surface p-4">
-                <span>
-                  Shared with <strong>{share.clinicianName}</strong> on {when(share.sharedAt)}
-                  {share.reviewedAt ? ` · reviewed ${when(share.reviewedAt)}` : " · not reviewed yet"}
+              <div key={share.id} className="stack">
+                <div className="list-card" style={{ padding: 16 }}>
+                  <PersonAvatar name={share.clinicianName ?? "Clinician"} />
+                  <span>
+                    <span style={{ fontWeight: 500, display: "block" }}>Shared with {share.clinicianName}</span>
+                    <span className="small muted">Shared {when(share.sharedAt)}</span>
+                  </span>
+                  <span />
+                </div>
+                <span style={{ justifySelf: "start" }}>
+                  {share.reviewedAt ? (
+                    <Chip tone="done" icon="check">
+                      Reviewed {when(share.reviewedAt)}
+                    </Chip>
+                  ) : (
+                    <Chip tone="planned" icon="clock">
+                      Not reviewed yet
+                    </Chip>
+                  )}
                 </span>
                 <form action={revoke}>
                   <input type="hidden" name="shareId" value={share.id} />
                   <input type="hidden" name="reportId" value={report.id} />
-                  <SubmitButton variant="secondary">Revoke access</SubmitButton>
+                  <SubmitButton variant="danger-ghost">Revoke access</SubmitButton>
                 </form>
-              </li>
+                <p className="muted small">Revoking removes the report from {share.clinicianName}&apos;s portal straight away.</p>
+              </div>
             ))}
-          </ul>
-        )}
-        {unsharedTeam.length > 0 ? (
-          <ShareForm reportId={report.id} team={unsharedTeam} />
-        ) : (
-          activeShares.length === 0 && <p className="text-muted">No clinician is linked to your account, so this report stays with you.</p>
-        )}
-      </section>
-    </div>
+            {unsharedTeam.length > 0 ? (
+              <ShareForm reportId={report.id} team={unsharedTeam} />
+            ) : (
+              activeShares.length === 0 && <p className="muted">No clinician is linked to your account, so this report stays with you.</p>
+            )}
+          </section>
+        </aside>
+      </div>
+    </>
   );
 }

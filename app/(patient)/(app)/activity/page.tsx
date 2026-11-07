@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { Empty, Icon, PageHead, PanelSummary } from "@/components/kindly/parts";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { summaryPreferences } from "@/lib/conversations/summary";
 import { AGENTS, type AgentKey } from "@/lib/agents/directory";
@@ -88,53 +89,99 @@ export default async function ActivityPage() {
   const time = (date: Date) => new Intl.DateTimeFormat("en-AU", { timeStyle: "medium", timeZone: user.timezone }).format(date);
   const day = (date: Date) => new Intl.DateTimeFormat("en-AU", { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: user.timezone }).format(date);
 
+  const bullets = (summary: string) =>
+    summary
+      .split("\n")
+      .map((line) => line.replace(/^\s*[-•]\s*/, "").trim())
+      .filter(Boolean);
+
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6">
-      <div>
-        <h1 className="text-3xl font-bold">Conversation activity</h1>
-        <p className="text-muted">Who you spoke with and what they did. Kindly never keeps the audio or the words.</p>
-        {!prefs.enabled && (
-          <p className="mt-2 text-sm text-muted">
-            Conversation summaries are off.{" "}
-            <Link href="/settings/privacy" className="font-semibold text-primary underline-offset-4 hover:underline">
-              Turn them on in Privacy & data
-            </Link>
-          </p>
-        )}
-      </div>
-      {sessions.length === 0 && <p className="text-muted">No conversations yet.</p>}
-      {sessions.map((session) => (
-        <section key={session.id} aria-labelledby={`session-${session.id}`} className="rounded-2xl border border-border bg-surface p-4">
-          <h2 id={`session-${session.id}`} className="font-bold">
-            {session.channel === "phone" ? "Phone call" : "Browser call"} · {day(session.startedAt)}
-            {session.state !== "ended" && <span className="ml-2 rounded-full bg-accent-soft px-2 py-0.5 text-sm">live</span>}
-          </h2>
-          {summaryFor.has(session.id) && (
-            <div className="mt-2 rounded-xl bg-primary-soft/60 p-3">
-              <p className="text-xs font-bold text-muted">Summary (only you can see this)</p>
-              <p className="whitespace-pre-line">{summaryFor.get(session.id)}</p>
-              <form action={removeSummary} className="mt-1">
-                <input type="hidden" name="sessionId" value={session.id} />
-                <SubmitButton variant="ghost" className="px-0 py-0 text-sm">
-                  Delete summary
-                </SubmitButton>
-              </form>
-            </div>
+    <>
+      <PageHead title="Conversation activity" sub="Who you spoke with and what they did. Kindly never keeps the audio or the words." />
+      <div className="split">
+        <div className="stack-24">
+          {sessions.length === 0 && (
+            <Empty icon="bubble" title="No conversations yet">
+              <p className="muted small">Calls with Milo, Natalie and Sarah will show here.</p>
+            </Empty>
           )}
-          <details className="mt-2" open={!summaryFor.has(session.id)}>
-            <summary className="cursor-pointer text-sm font-semibold text-primary">Timeline</summary>
-            <ol className="mt-2 flex flex-col gap-1 border-l-2 border-border pl-4">
-              {events
-                .filter((event) => event.sessionId === session.id)
-                .map((event, index) => (
-                  <li key={index} className="text-sm">
-                    <span className="text-muted">{time(event.at)}</span> · {describe({ agent: event.agent, eventType: event.eventType, payload: event.payload })}
-                  </li>
-                ))}
-            </ol>
-          </details>
-        </section>
-      ))}
-    </div>
+          {sessions.map((session) => {
+            const summary = summaryFor.get(session.id);
+            const sessionEvents = events.filter((event) => event.sessionId === session.id);
+            return (
+              <section key={session.id} aria-labelledby={`session-${session.id}`} className="card card--lg stack-24">
+                <div className="row nowrap" style={{ gap: 14 }}>
+                  <span className="cat-icon">
+                    <Icon name={session.channel === "phone" ? "phone" : "mic"} />
+                  </span>
+                  <h2 id={`session-${session.id}`} className="title">
+                    {session.channel === "phone" ? "Phone call" : "Browser call"}{" "}
+                    <span className="muted" style={{ fontWeight: 400 }}>
+                      · {day(session.startedAt)}
+                    </span>
+                    {session.state !== "ended" && (
+                      <span className="tag tag--soft" style={{ marginLeft: 8 }}>
+                        LIVE
+                      </span>
+                    )}
+                  </h2>
+                </div>
+                {summary ? (
+                  <div className="summary-box">
+                    <div className="row row--between">
+                      <p className="row" style={{ gap: 8 }}>
+                        <span className="tag tag--soft">
+                          <Icon name="sparkle" className="icon--sm" />
+                          AI SUMMARY
+                        </span>
+                        <span className="small muted">Only you can see this</span>
+                      </p>
+                      <form action={removeSummary}>
+                        <input type="hidden" name="sessionId" value={session.id} />
+                        <SubmitButton variant="link" size="sm" className="link--danger">
+                          Delete summary
+                        </SubmitButton>
+                      </form>
+                    </div>
+                    <ul>
+                      {bullets(summary).map((line, index) => (
+                        <li key={index}>{line}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <p className="muted small">No summary for this call.</p>
+                )}
+                <details className="panel panel-sm" open={!summary}>
+                  <PanelSummary icon="clock">Timeline</PanelSummary>
+                  <div className="panel__body">
+                    <ol className="timeline">
+                      {sessionEvents.map((event, index) => (
+                        <li key={index}>
+                          <span className="t">{time(event.at)}</span>
+                          <span className={`dot ${event.eventType === "action_executed" ? "dot--key" : ""}`} />
+                          <span>{describe({ agent: event.agent, eventType: event.eventType, payload: event.payload })}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                </details>
+              </section>
+            );
+          })}
+        </div>
+        <aside className="sticky stack-24">
+          <div className="card stack">
+            <p className="title">About summaries</p>
+            <p className="muted small">
+              {prefs.enabled ? "Summaries are written by AI when a call ends, only for you." : "Conversation summaries are off."} Chats with Sarah are left out unless you choose otherwise.
+            </p>
+            <Link className="link small" href="/settings/privacy">
+              {prefs.enabled ? "Privacy & data" : "Turn them on in Privacy & data"}
+            </Link>
+          </div>
+        </aside>
+      </div>
+    </>
   );
 }

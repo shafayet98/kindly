@@ -18,14 +18,14 @@ export async function toggleConsent(formData: FormData) {
   const user = await requireOnboardedPatient();
   const purpose = TOGGLEABLE.safeParse(formData.get("purpose"));
   if (!purpose.success) return;
-  await setConsent(user.id, purpose.data, formData.get("grant") === "true");
+  await setConsent(user.id, purpose.data, formData.get("next") === "true");
   revalidatePath("/settings/privacy");
 }
 
 /** Whether summaries may include the part of a call spent with Sarah. Off unless chosen. */
 export async function toggleSarahInSummaries(formData: FormData) {
   const user = await requireOnboardedPatient();
-  const include = formData.get("include") === "true";
+  const include = formData.get("next") === "true";
   const [profile] = await db.select({ preferences: schema.patientProfiles.preferences }).from(schema.patientProfiles).where(eq(schema.patientProfiles.userId, user.id));
   await db
     .update(schema.patientProfiles)

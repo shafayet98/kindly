@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { draftGoal, saveNewGoal, type ActionResult } from "@/app/(patient)/goal-actions";
+import { Icon } from "@/components/kindly/icon";
 import { Button } from "@/components/ui/button";
 import { Notice } from "@/components/ui/notice";
 import { SubmitButton } from "@/components/ui/submit-button";
@@ -12,7 +13,7 @@ import { GoalFields } from "./goal-fields";
 const EXAMPLES = ["Walk 3 days a week", "30 push-ups", "Take my tablets at 8 AM", "In bed by 10:30 on weeknights"];
 
 /** Type a goal in your own words, check what Kindly understood, then save. */
-export function AddGoal({ phoneCallsOn, afterSave }: { phoneCallsOn: boolean; afterSave?: string }) {
+export function AddGoal({ phoneCallsOn, afterSave, idPrefix = "goal" }: { phoneCallsOn: boolean; afterSave?: string; idPrefix?: string }) {
   const router = useRouter();
   const [text, setText] = useState("");
   const [draft, setDraft] = useState<GoalInput | null>(null);
@@ -20,6 +21,7 @@ export function AddGoal({ phoneCallsOn, afterSave }: { phoneCallsOn: boolean; af
   const [reading, startReading] = useTransition();
   const [result, save] = useActionState<ActionResult | null, FormData>(saveNewGoal, null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  const textId = `${idPrefix}-text`;
 
   useEffect(() => {
     if (!result?.ok) return;
@@ -34,68 +36,84 @@ export function AddGoal({ phoneCallsOn, afterSave }: { phoneCallsOn: boolean; af
     setSavedMessage(result.message ?? "Goal saved.");
   }, [result, afterSave, router]);
 
+  const read = () => {
+    setError(null);
+    setSavedMessage(null);
+    startReading(async () => {
+      const response = await draftGoal(text);
+      if (response.ok) setDraft(response.draft);
+      else setError(response.error);
+    });
+  };
+
   if (!draft) {
     return (
       <form
-        className="flex flex-col gap-3"
+        className="stack"
         onSubmit={(event) => {
           event.preventDefault();
-          setError(null);
-          setSavedMessage(null);
-          startReading(async () => {
-            const response = await draftGoal(text);
-            if (response.ok) setDraft(response.draft);
-            else setError(response.error);
-          });
+          read();
         }}
       >
         {savedMessage && <Notice tone="success">{savedMessage}</Notice>}
         {error && <Notice tone="error">{error}</Notice>}
-        <label htmlFor="goal-text" className="font-semibold">
+        <label className="field__label" htmlFor={textId} style={{ fontSize: 19 }}>
           What would you like to do?
         </label>
-        <input
-          id="goal-text"
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          maxLength={300}
-          placeholder="e.g. Walk 3 days a week"
-          className="rounded-xl border border-border bg-surface px-4 py-3"
-        />
-        <div className="flex flex-wrap gap-2" aria-label="Examples">
+        <div className="row nowrap" style={{ gap: 12 }}>
+          <input
+            id={textId}
+            className="input"
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            maxLength={300}
+            placeholder="e.g. Walk 3 days a week"
+            style={{ minHeight: 60, fontSize: 19, borderRadius: "20px 20px 20px 4px", padding: "14px 20px" }}
+          />
+          <Button type="submit" size="lg" disabled={text.trim().length < 2} aria-busy={reading || undefined}>
+            Continue
+          </Button>
+        </div>
+        <div className="chips" aria-label="Examples">
           {EXAMPLES.map((example) => (
-            <button key={example} type="button" onClick={() => setText(example)} className="rounded-full border border-border px-3 py-1 text-sm hover:border-primary hover:bg-primary-soft">
+            <button key={example} type="button" className="suggestion" onClick={() => setText(example)}>
               {example}
             </button>
           ))}
         </div>
-        <Button type="submit" disabled={reading || text.trim().length < 2} className="self-start">
-          {reading ? "Reading…" : "Continue"}
-        </Button>
       </form>
     );
   }
 
   return (
-    <form action={save} className="flex flex-col gap-4">
-      <p className="text-sm text-muted">Here&apos;s what we understood. Change anything that&apos;s not right.</p>
+    <form action={save} className="stack-32">
+      <div className="notice notice--success" role="status">
+        <Icon name="sparkle" />
+        <p>
+          <span className="notice__title">Here&apos;s what we understood.</span> Change anything that&apos;s not right.
+        </p>
+      </div>
       {result && !result.ok && <Notice tone="error">{result.error}</Notice>}
-      <GoalFields initial={draft} idPrefix="new-goal" />
-      <label className="flex flex-col gap-1.5 font-semibold sm:max-w-sm">
-        Reminder
-        <select name="remind" defaultValue="none" className="rounded-xl border border-border bg-surface px-3 py-2 font-normal">
+      <GoalFields initial={draft} idPrefix={`${idPrefix}-new`} />
+      <div className="field" style={{ maxWidth: 420 }}>
+        <label className="field__label" htmlFor={`${idPrefix}-rem`}>
+          Reminder
+        </label>
+        <select className="select" id={`${idPrefix}-rem`} name="remind" defaultValue="none" aria-describedby={`${idPrefix}-rem-hint`}>
           <option value="none">No reminder</option>
           <option value="in_app">In the app</option>
           <option value="phone" disabled={!phoneCallsOn}>
-            A phone call from Milo{phoneCallsOn ? "" : " (turn on phone calls first)"}
+            Phone call from Milo{phoneCallsOn ? "" : " (turn on phone calls first)"}
           </option>
         </select>
-        <span className="text-sm font-normal text-muted">Rings at the goal&apos;s time. If it has no time, at 9:00 AM.</span>
-      </label>
-      <div className="flex flex-wrap gap-3">
-        <SubmitButton>Save goal</SubmitButton>
-        <Button type="button" variant="ghost" onClick={() => setDraft(null)}>
-          ← Back
+        <p className="field__hint" id={`${idPrefix}-rem-hint`}>
+          Rings at the goal&apos;s time. If it has no time, at 9:00 AM.
+        </p>
+      </div>
+      <div className="row" style={{ gap: 16 }}>
+        <SubmitButton size="lg">Save goal</SubmitButton>
+        <Button variant="link" onClick={() => setDraft(null)}>
+          Change what I typed
         </Button>
       </div>
     </form>
