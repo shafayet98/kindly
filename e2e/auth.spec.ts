@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { signIn, signOut } from "./helpers";
+import { DEMO_PASSWORD, db, deleteUser, signIn, signOut, sql } from "./helpers";
 
 test("public landing page and email/password-only login (AC-25)", async ({ page }) => {
   await page.goto("/");
@@ -61,4 +61,32 @@ test("an approved clinician lands on their patient list", async ({ page }) => {
   await expect(page).toHaveURL(/\/clinician\/patients$/);
   await expect(page.getByText("Alex Rivera")).toBeVisible();
   await expect(page.getByText("Priya Shah")).toHaveCount(0);
+});
+
+test("with email confirmation off, sign-up goes straight to onboarding", async ({ page, browser }) => {
+  const settings = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/settings`, {
+    headers: { apikey: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? "" },
+  }).then((response) => response.json());
+  test.skip(!settings.mailer_autoconfirm, "Supabase 'Confirm email' is on");
+
+  const email = `signup.e2e.${Date.now()}@example.com`;
+  try {
+    await page.goto("/signup");
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill(DEMO_PASSWORD);
+    await page.getByRole("button", { name: "Create account" }).click();
+    await expect(page).toHaveURL(/\/onboarding$/);
+    await expect(page.getByRole("heading", { name: "Welcome to Kindly" })).toBeVisible();
+
+    const other = await browser.newPage();
+    await other.goto("/signup");
+    await other.getByLabel("Email").fill(email);
+    await other.getByLabel("Password").fill(DEMO_PASSWORD);
+    await other.getByRole("button", { name: "Create account" }).click();
+    await expect(other.getByRole("main").getByRole("alert")).toContainText("already has an account");
+    await other.close();
+  } finally {
+    const [row] = await db.execute<{ id: string }>(sql`select id from auth.users where email = ${email}`);
+    if (row) await deleteUser(row.id);
+  }
 });
