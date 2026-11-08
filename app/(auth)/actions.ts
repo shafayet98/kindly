@@ -35,7 +35,7 @@ export async function signUp(_prev: FormState, formData: FormData): Promise<Form
   if (!parsed.success) return { status: "error", fieldErrors: fieldErrors(parsed.error.issues) };
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email: parsed.data.email,
     password: parsed.data.password,
     options: { emailRedirectTo: siteUrl("/auth/confirm") },
@@ -44,7 +44,20 @@ export async function signUp(_prev: FormState, formData: FormData): Promise<Form
   if (error) {
     if (error.code === "weak_password") return { status: "error", fieldErrors: { password: "Choose a stronger password." } };
     if (error.code === "over_email_send_rate_limit" || error.status === 429) return TOO_MANY;
+    // Only reachable with "Confirm email" off in Supabase; with it on, Supabase hides existing accounts.
+    if (error.code === "user_already_exists") {
+      return { status: "error", message: "This email already has an account. Sign in instead, or reset your password." };
+    }
     return { status: "error", message: "We couldn't create your account right now. Please try again." };
+  }
+
+  // With "Confirm email" off in Supabase the person is signed in straight away.
+  if (data.session && data.user) {
+    const user = await ensureAppUser(data.user);
+    if (user) {
+      await audit({ actorUserId: user.id, actorType: user.role, resourceType: "session", action: "auth.sign_in", result: "success" });
+      redirect(homePathFor(user));
+    }
   }
 
   // Same response whether or not the email already has an account.
