@@ -3,9 +3,10 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { CalendarReminder, GoalInfo } from "@/components/goals/week-calendar";
 import { AGENTS } from "@/lib/agents/directory";
 import { db, schema } from "@/lib/db";
-import { formatTime12h } from "@/lib/scheduling/occurrences";
+import { formatDays, formatTime12h } from "@/lib/scheduling/occurrences";
 import { addDays, localDate, weekStartOf } from "@/lib/time";
 import { describeSchedule } from "./describe";
+import { hasFixedSessions } from "./schedule";
 import { loadWeek } from "./service";
 
 /** A valid Monday from a ?week= parameter, or this week's Monday. */
@@ -49,12 +50,22 @@ export async function loadCalendar(userId: string, timezone: string, weekStart: 
       schedule: describeSchedule(goal),
       notes: goal.notes,
       origin,
-      reminder: linked.length ? linked.map((r) => `${r.channel === "phone" ? "Phone call from Milo" : "In the app"} at ${formatTime12h(r.localTime)}`).join("; ") : null,
+      // A flexible goal has no set days, so say which days its reminder rings.
+      reminder: linked.length
+        ? linked
+            .map((r) => `${r.channel === "phone" ? "Phone call from Milo" : "In the app"} at ${formatTime12h(r.localTime)}${hasFixedSessions(goal) ? "" : ` · ${formatDays(r.daysOfWeek)}`}`)
+            .join("; ")
+        : null,
     };
   }
 
+  // A goal with set days already shows its reminder on its sessions; a flexible goal has no
+  // sessions to show, so its reminder appears on the days it rings.
   const standalone: CalendarReminder[] = reminders
-    .filter((reminder) => !reminder.goalId || !goals.some((goal) => goal.id === reminder.goalId))
+    .filter((reminder) => {
+      const goal = reminder.goalId ? goals.find((candidate) => candidate.id === reminder.goalId) : undefined;
+      return !goal || !hasFixedSessions(goal);
+    })
     .map((reminder) => ({ id: reminder.id, title: reminder.title, time: reminder.localTime, days: reminder.daysOfWeek, channel: reminder.channel }));
 
   const thisWeek = weekStartOf(week.today);

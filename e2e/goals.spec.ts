@@ -80,6 +80,30 @@ test("goals counted per week can be logged from the calendar", async ({ page }) 
   await expect(page.getByRole("list", { name: "Goals counted per week or month" }).getByText(/Try a new healthy recipe · \d of 2 this month/)).toBeVisible();
 });
 
+test("a flexible weekly goal's reminder shows on the days it rings", async ({ page }) => {
+  const userId = await alexId();
+  const [goal] = await db.execute<{ id: string; timezone: string }>(
+    sql`select g.id, u.timezone from goals g join users u on u.id = g.user_id where g.user_id = ${userId} and g.title = '30 push-ups' and g.ends_on is null`,
+  );
+  const [reminder] = await db.execute<{ id: string }>(
+    sql`insert into reminders (user_id, goal_id, title, local_time, days_of_week, timezone, channel) values (${userId}, ${goal.id}, '30 push-ups', '17:00', '{2,4}', ${goal.timezone}, 'in_app') returning id`,
+  );
+  try {
+    await signIn(page, "demo.patient@example.com");
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await page.goto("/dashboard?week=" + new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10));
+    const days = page.getByRole("main").locator("li").filter({ has: page.getByText("Reminder · 30 push-ups · 5:00 PM") });
+    await expect(days).toHaveCount(2);
+    await expect(days.nth(0)).toContainText("Tuesday");
+    await expect(days.nth(1)).toContainText("Thursday");
+
+    await page.goto("/goals");
+    await expect(page.getByRole("article").filter({ hasText: "30 push-ups" })).toContainText("In-app reminder at 5:00 PM · Tue, Thu");
+  } finally {
+    await db.execute(sql`delete from reminders where id = ${reminder.id}`);
+  }
+});
+
 test("progress shows each week by category, and where patterns and changes came from", async ({ page }) => {
   await signIn(page, "demo.patient@example.com");
   await expect(page).toHaveURL(/\/dashboard$/);

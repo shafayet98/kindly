@@ -13,9 +13,10 @@ import { getConsentState } from "@/lib/consent/store";
 import { db, schema } from "@/lib/db";
 import { GOAL_CATEGORIES, GOAL_CATEGORY_KEYS } from "@/lib/goals/categories";
 import { describeSchedule } from "@/lib/goals/describe";
+import { hasFixedSessions } from "@/lib/goals/schedule";
 import { activeGoals } from "@/lib/goals/service";
 import { recentHabitEvents } from "@/lib/habits/service";
-import { formatTime12h } from "@/lib/scheduling/occurrences";
+import { formatDays, formatTime12h } from "@/lib/scheduling/occurrences";
 import { localDate } from "@/lib/time";
 import { allowHealthData } from "./actions";
 import { EditGoalForm } from "./edit-goal";
@@ -106,6 +107,7 @@ export default async function GoalsPage() {
                                   <Icon name={reminder.channel === "phone" ? "phone" : "bell"} className="icon--sm" />
                                   <span>
                                     {reminder.channel === "phone" ? "Phone call from Milo" : "In-app reminder"} at {formatTime12h(reminder.localTime)}
+                                    {hasFixedSessions(goal) ? "" : ` · ${formatDays(reminder.daysOfWeek)}`}
                                     {reminder.status === "paused" ? " (paused)" : ""}
                                   </span>
                                 </p>
