@@ -33,3 +33,6 @@ next-env.d.ts
 
 # local logs
 /logs
+
+# Supabase CLI cache
+supabase/.temp/
