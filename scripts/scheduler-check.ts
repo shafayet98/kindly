@@ -1,6 +1,8 @@
 // Exercises the call scheduler against the real database with a FAKE Twilio client: nothing is
-// ever dialled. Uses a throwaway user that is deleted afterwards. Usage: pnpm scheduler:check
+// ever dialled. Uses a throwaway user that is deleted afterwards. Runs only against the test
+// project (.env.test), so the live phone server can never pick up its jobs. Usage: pnpm scheduler:check
 import "./load-env";
+import { assertTestProject } from "@/lib/env-files";
 import { eq, sql } from "drizzle-orm";
 import pino from "pino";
 import { db, schema } from "@/lib/db";
@@ -13,6 +15,8 @@ import { createReminder } from "@/lib/reminders/service";
 import { enablePhoneCalls, pauseCalls, resumeCalls } from "@/lib/calls/settings";
 import { ensureAppUserForScript } from "./script-users";
 import { applyCallStatus, runSchedulerOnce } from "../realtime-server/scheduler";
+
+assertTestProject();
 
 const log = pino({ level: "silent" });
 const placed: string[] = [];
@@ -31,7 +35,7 @@ const fakeTwilio = {
   },
 } as never;
 const env = { TWILIO_PHONE_NUMBER: "+15550000000", PUBLIC_BASE_URL: "https://example.invalid", CALL_MAX_DURATION_SECONDS: 300, CALLS_MAX_PER_HOUR: 20 };
-const deps = { env, twilio: fakeTwilio, log } as never;
+const deps = { env, twilio: fakeTwilio, log, allowFictionalNumbers: true } as never;
 
 const results: [string, boolean][] = [];
 const check = (name: string, ok: boolean) => {
@@ -57,7 +61,7 @@ try {
   check("no consent: on-demand call is skipped, not dialled", placed.length === 0 && (!before.ok || (await job(before.jobId)).lastError === "no_phone"));
 
   // 2. With consent, an on-demand call is dialled exactly once (rate limit allows 3/hour).
-  await enablePhoneCalls(userId, "+61400000001");
+  await enablePhoneCalls(userId, "+61491570157");
   await noQuietHours();
   const queued = await queueOnDemandCall(userId);
   await Promise.all([runSchedulerOnce(deps), runSchedulerOnce(deps)]); // two schedulers racing
@@ -135,6 +139,13 @@ try {
     scheduled.includes(`${tomorrow} 20:30 (moved)`) && !scheduled.includes(`${tomorrow} 19:00`) && scheduled.some((entry) => entry === `${addDays(tomorrow, 1)} 19:00`),
   );
   if (!results.at(-1)![1]) console.log("      scheduled jobs:", scheduled);
+
+  // 9. A real scheduler (without the fake-Twilio opt-out) never dials a fictional test number.
+  await db.delete(schema.callJobs).where(sql`${schema.callJobs.userId} = ${userId} and ${schema.callJobs.kind} = 'on_demand'`);
+  const guarded = await queueOnDemandCall(userId);
+  const placedBefore = placed.length;
+  await runSchedulerOnce({ env, twilio: fakeTwilio, log } as never);
+  check("a fictional number is never dialled", guarded.ok && placed.length === placedBefore && (await job(guarded.jobId)).lastError === "fictional number");
 } finally {
   await admin.auth.admin.deleteUser(authUserId);
 }

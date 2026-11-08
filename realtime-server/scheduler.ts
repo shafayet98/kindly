@@ -5,6 +5,7 @@ import { db, schema } from "@/lib/db";
 import { isWithinQuietHours, localClock } from "@/lib/scheduling/occurrences";
 import { scheduleNextJob } from "@/lib/scheduling/jobs";
 import { checkCallEligibility } from "@/lib/telephony/eligibility";
+import { isFictionalNumber } from "@/lib/telephony/phone";
 import { bindToken, issueToken } from "@/lib/telephony/stream-tokens";
 import { localDate } from "@/lib/time";
 import type { AuthorizedCall } from "@/lib/voice/twilio-realtime";
@@ -20,7 +21,13 @@ const STALE_DIAL_MS = 2 * 60_000;
 
 type ClaimedJob = { id: string; user_id: string; reminder_id: string | null; kind: "reminder" | "on_demand"; due_at: Date; attempts: number };
 
-type Deps = { env: Pick<Env, "TWILIO_PHONE_NUMBER" | "PUBLIC_BASE_URL" | "CALL_MAX_DURATION_SECONDS" | "CALLS_MAX_PER_HOUR">; twilio: Pick<Twilio, "calls">; log: FastifyBaseLogger };
+type Deps = {
+  env: Pick<Env, "TWILIO_PHONE_NUMBER" | "PUBLIC_BASE_URL" | "CALL_MAX_DURATION_SECONDS" | "CALLS_MAX_PER_HOUR">;
+  twilio: Pick<Twilio, "calls">;
+  log: FastifyBaseLogger;
+  // Only for scheduler:check, whose fake Twilio "dials" a fictional number.
+  allowFictionalNumbers?: boolean;
+};
 
 export function startScheduler(deps: Deps) {
   let running = false;
@@ -70,7 +77,7 @@ async function finish(job: ClaimedJob, status: "skipped" | "failed", reason: str
   if (scheduleNext && job.reminder_id) await scheduleNextJob(job.reminder_id);
 }
 
-async function processJob(job: ClaimedJob, { env, twilio, log }: Deps) {
+async function processJob(job: ClaimedJob, { env, twilio, log, allowFictionalNumbers }: Deps) {
   const lateness = Date.now() - new Date(job.due_at).getTime();
   if (job.kind === "reminder" && job.attempts === 1 && lateness > MISSED_WINDOW_MS) return finish(job, "skipped", "missed call window");
   // "Call me now" means now: a request left queued while the server was down must never ring later.
@@ -79,6 +86,8 @@ async function processJob(job: ClaimedJob, { env, twilio, log }: Deps) {
   // Consent and switches are re-checked at dial time, so a pause or opt-out always wins (AC-11, AC-41).
   const eligibility = await checkCallEligibility(job.user_id);
   if (!eligibility.ok) return finish(job, "skipped", eligibility.reason, false);
+  // Tests use the ACMA's fiction numbers. Never dial one, even if a test's job reaches a real scheduler.
+  if (isFictionalNumber(eligibility.phoneE164) && !allowFictionalNumbers) return finish(job, "skipped", "fictional number", false);
 
   const [prefs] = await db.select().from(schema.callPreferences).where(eq(schema.callPreferences.userId, job.user_id));
   const now = new Date();

@@ -1,10 +1,11 @@
-import { config } from "dotenv";
 import { defineConfig, devices } from "@playwright/test";
+import { assertTestProject, loadEnvFiles } from "./lib/env-files";
 
-config({ path: ".env", quiet: true });
-
-// End-to-end tests run against the real Supabase project with fictional demo accounts.
-// They need .env, so they run locally (pnpm test:e2e), not in CI.
+// End-to-end tests run against a separate test Supabase project (.env.test on top of .env), never the
+// live one: they reset demo data, and the live phone server would dial calls they create. Local only.
+process.env.KINDLY_ENV = "test";
+loadEnvFiles();
+assertTestProject();
 export default defineConfig({
   testDir: "./e2e",
   globalSetup: "./e2e/global-setup.ts",
@@ -25,5 +26,5 @@ export default defineConfig({
       },
     },
   ],
-  webServer: { command: "pnpm dev", url: "http://localhost:3000", reuseExistingServer: true, timeout: 120_000 },
+  webServer: { command: "pnpm dev", url: "http://localhost:3000", reuseExistingServer: false, timeout: 120_000 },
 });

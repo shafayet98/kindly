@@ -4,12 +4,14 @@ A voice-first, multi-agent health and wellbeing companion. Built for the Future 
 
 > Prototype. Fictional data only — no real patient data. Kindly's companions are AI; it is not a medical or emergency service.
 
-**Docs:** [Deployment guide](docs/DEPLOYMENT.md) · [Demo runbook](docs/DEMO_RUNBOOK.md)
+**Docs:** [Contributing](CONTRIBUTING.md) · [Deployment guide](docs/DEPLOYMENT.md) · [Demo runbook](docs/DEMO_RUNBOOK.md)
+
+**Live:** https://kindly-six-delta.vercel.app (web, Vercel) · phone server on Railway. Merging to `main` deploys both.
 
 ## Stack
 
 - **Web app:** Next.js 16 (App Router), React 19, Tailwind CSS 4
-- **Auth:** Supabase Auth, email + password with required email confirmation
+- **Auth:** Supabase Auth, email + password (email confirmation is off for the MVP; the confirmation flow still works if it's turned on)
 - **Database:** Supabase Postgres via Drizzle ORM. Row-level security is on for every table with no policies, so the Supabase Data API exposes nothing; all access goes through server code that checks ownership.
 - **Voice:** OpenAI Realtime (`@openai/agents`) — Milo, Natalie and Sarah with same-call handoffs
 - **Phone:** Twilio Programmable Voice + Media Streams, bridged by a Fastify server (`realtime-server/`)
@@ -21,8 +23,9 @@ A voice-first, multi-agent health and wellbeing companion. Built for the Future 
 3. `pnpm db:migrate` — create the tables.
 4. `pnpm demo:reset` — create the fictional demo accounts and 5 weeks of synthetic history. Password is `DEMO_PASSWORD` in `.env`.
 5. `pnpm dev` — web app on http://localhost:3000
+6. For browser tests, set up a separate test project in `.env.test` — see [CONTRIBUTING.md](CONTRIBUTING.md#3-your-test-project-envtest).
 
-Supabase dashboard settings: **Authentication → Sign In / Providers**: Email on, *Confirm email* on, other providers off. **URL Configuration**: Site URL `http://localhost:3000`, redirect URL `http://localhost:3000/**`.
+Supabase dashboard settings: **Authentication → Sign In / Providers**: Email on, *Confirm email* off (MVP), other providers off. **URL Configuration**: Site URL `http://localhost:3000`, redirect URL `http://localhost:3000/**`.
 
 ### Demo accounts
 
@@ -46,6 +49,7 @@ The scheduler only runs when `SCHEDULER_ENABLED=true`, so starting the server an
 - Each active phone reminder has exactly one `scheduled` job for its next local occurrence (idempotency key = reminder + occurrence), recomputed whenever the reminder changes.
 - The phone server claims due jobs with `FOR UPDATE SKIP LOCKED`, then re-checks consent, pause, quiet hours, the user's daily limit and a service-wide hourly cap before dialling.
 - Twilio status callbacks (signature-validated) move a job through ringing → in progress → answered / missed / busy / failed. Unanswered reminder calls retry on the same job up to the user's limit, then the next occurrence is scheduled.
+- The scheduler never dials the ACMA's fiction numbers (`0491 570 006` and so on), which are the only numbers tests use.
 - Late reminder calls (>15 min, e.g. server down) and "call me now" requests older than 2 minutes are skipped, never placed late. A claimed job whose dial state is unknown is failed rather than redialled.
 - Agents change reminders in two steps: propose (stored in `action_confirmations`) and `confirm_action` after the person says yes. A confirmation executes once; Natalie's changes are recorded as delegations to Milo's reminder service.
 
@@ -54,9 +58,10 @@ The scheduler only runs when `SCHEDULER_ENABLED=true`, so starting the server an
 | Command | What it does |
 |---|---|
 | `pnpm lint` / `pnpm typecheck` / `pnpm test` | Checks run in CI |
-| `pnpm test:e2e` | Playwright browser tests against the real Supabase project, including a real browser voice call with a fake microphone (needs `.env`; local only; resets demo data first) |
+| `pnpm test:e2e` | Playwright browser tests against the **separate test project** (`.env.test`, refuses to run otherwise), including a real browser voice call with a fake microphone (local only; resets the test project's demo data first) |
+| `pnpm test:db:migrate` / `pnpm test:db:reset` | Create the tables / demo data in the test project |
 | `pnpm voice:smoke` | Text-only conversation with the live agents: tools, handoffs, Sarah privacy pruning (real Realtime API, a few cents) |
-| `pnpm scheduler:check` | Runs the call scheduler against the database with a **fake** Twilio client (never dials): consent, races, retries, pause, quiet hours, expiry, errors |
+| `pnpm scheduler:check` | Runs the call scheduler against the test project with a **fake** Twilio client (never dials): consent, races, retries, pause, quiet hours, expiry, errors, fiction numbers refused |
 | `pnpm voice:smoke:health` | Natalie logs a check-in, corrects it, asks Iris for progress and agrees a smaller goal with Theo (real Realtime API; run `pnpm demo:reset` after) |
 | `pnpm safety:smoke` | Emergency and suicidal-distress messages trigger the predefined safety workflow, dosing advice is declined, prompt injection can't reach other users (real Realtime API) |
 | `pnpm summary:smoke` | Conversation summaries: Sarah's part excluded by default, included when opted in, injected instructions ignored (real model) |
