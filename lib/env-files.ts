@@ -4,12 +4,13 @@ import { isFictionalNumber } from "./telephony/phone";
 
 /**
  * Loads .env and, when KINDLY_ENV=test, .env.test on top of it (the separate test Supabase project).
- * Variables already set in the environment always win, so hosted settings are never overridden.
+ * Outside test mode, variables already in the environment win, so hosted settings are never
+ * overridden. In test mode .env.test always wins: some tools (drizzle-kit) load .env by themselves.
  */
 export function loadEnvFiles() {
   if (process.env.KINDLY_ENV === "test") {
     if (!existsSync(".env.test")) throw new Error("KINDLY_ENV=test needs a .env.test file for the test Supabase project. See CONTRIBUTING.md.");
-    config({ path: ".env.test", quiet: true });
+    config({ path: ".env.test", quiet: true, override: true });
   }
   config({ path: ".env", quiet: true });
 }
