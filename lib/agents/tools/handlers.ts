@@ -1,13 +1,13 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { getCallSettings } from "@/lib/calls/settings";
 import { db, schema } from "@/lib/db";
-import { describeReminder, getOwnedReminder } from "@/lib/reminders/service";
+import { describeReminder, getOwnedReminder, PHONE_CALLS_OFF, phoneCallsAllowed } from "@/lib/reminders/service";
 import { formatDays, formatTime12h } from "@/lib/scheduling/occurrences";
 import { HabitError, correctHabitEvent, logHabitEvent, recentHabitEvents } from "@/lib/habits/service";
 import { loadInsights } from "@/lib/insights/load";
 import { GOAL_CATEGORIES } from "@/lib/goals/categories";
 import { describeSchedule } from "@/lib/goals/describe";
-import { countProgress, hasFixedSessions, parseItemKey } from "@/lib/goals/schedule";
+import { countProgress, hasFixedSessions, parseItemKey, takesReminderDays } from "@/lib/goals/schedule";
 import { activeGoals, getOwnedGoal, GoalError, loadSessions, markSessionDone, normaliseGoal, type GoalInput } from "@/lib/goals/service";
 import { weekStartOf } from "@/lib/insights/iris";
 import { PlanError, proposeGoalChange, proposeNewGoal } from "@/lib/plans/service";
@@ -141,7 +141,9 @@ export const handlers: ToolHandlers = {
     if (input.action === "reschedule") {
       if (!input.new_time && !input.days) return { error: "Say what should change: a new time, new days, or both." };
       const after = { ...reminder, localTime: input.new_time ?? reminder.localTime, daysOfWeek: input.days ?? reminder.daysOfWeek };
-      const summary = `Move ${describeReminder(reminder)} to ${formatTime12h(after.localTime)}, ${formatDays(after.daysOfWeek).toLowerCase()}.`;
+      const goal = reminder.goalId ? await getOwnedGoal(ctx.userId, reminder.goalId) : null;
+      const goalNote = goal && !goal.endsOn && takesReminderDays(goal, after.daysOfWeek) ? ` “${goal.title}” will then be planned for those days, so it shows in the calendar.` : "";
+      const summary = `Move ${describeReminder(reminder)} to ${formatTime12h(after.localTime)}, ${formatDays(after.daysOfWeek).toLowerCase()}.${goalNote}`;
       const confirmationId = await proposeAction(
         ctx,
         { kind: "reminder.reschedule", payload: { reminderId: reminder.id, localTime: after.localTime, daysOfWeek: after.daysOfWeek } },
@@ -157,6 +159,9 @@ export const handlers: ToolHandlers = {
   },
 
   async propose_new_reminder(ctx, input) {
+    // Checked now, so the person is never asked to agree to something that can't be saved.
+    if (input.delivery === "phone" && !(await phoneCallsAllowed(ctx.userId))) return { error: `${PHONE_CALLS_OFF} Tell the person, and offer an in-app reminder instead.` };
+    let goalNote = "";
     let fields = { title: input.title.trim(), localTime: input.time, daysOfWeek: [...new Set(input.days)].sort(), channel: input.delivery, goalId: null as string | null };
     if (input.goal_id) {
       const goal = UUID.test(input.goal_id) ? await getOwnedGoal(ctx.userId, input.goal_id) : null;
@@ -165,9 +170,11 @@ export const handlers: ToolHandlers = {
       // Reminders for goals with a set schedule follow the goal's time and days.
       if (hasFixedSessions(goal) && goal.times.length === 1) {
         fields = { ...fields, localTime: goal.times[0], daysOfWeek: goal.daysOfWeek?.length ? goal.daysOfWeek : [0, 1, 2, 3, 4, 5, 6] };
+      } else if (takesReminderDays(goal, fields.daysOfWeek)) {
+        goalNote = ` “${goal.title}” will then be planned for ${formatDays(fields.daysOfWeek)} at ${formatTime12h(fields.localTime)}, so it shows in the calendar.`;
       }
     }
-    const summary = `Create ${describeReminder(fields)}.`;
+    const summary = `Create ${describeReminder(fields)}.${goalNote}`;
     const confirmationId = await proposeAction(ctx, { kind: "reminder.create", payload: fields }, summary);
     return { confirmation_id: confirmationId, summary, next_step: ASK };
   },

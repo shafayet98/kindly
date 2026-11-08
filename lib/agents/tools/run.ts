@@ -26,7 +26,7 @@ export async function runTool(ctx: ToolContext, name: unknown, rawInput: unknown
   try {
     const handler = handlers[name] as (context: ToolContext, value: unknown) => Promise<Record<string, unknown>>;
     const result = await handler(ctx, input.data);
-    await recordAgentEvent({ sessionId: ctx.sessionId, userId: ctx.userId, agent: ctx.agent, eventType: "tool_call", payload: { tool: name, ok: true } });
+    await recordAgentEvent({ sessionId: ctx.sessionId, userId: ctx.userId, agent: ctx.agent, eventType: "tool_call", payload: { tool: name, ok: !("error" in result) } });
     return { ok: true, result };
   } catch (error) {
     await recordAgentEvent({ sessionId: ctx.sessionId, userId: ctx.userId, agent: ctx.agent, eventType: "tool_call", payload: { tool: name, ok: false } });

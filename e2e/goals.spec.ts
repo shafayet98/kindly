@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { db, signIn, sql } from "./helpers";
+import { runTool } from "@/lib/agents/tools/run";
+import { enablePhoneCalls } from "@/lib/calls/settings";
+import { createGoal } from "@/lib/goals/service";
+import { ensureAppUserForScript } from "../scripts/script-users";
+import { createConfirmedUser, db, deleteUser, signIn, sql } from "./helpers";
 
 async function alexId() {
   const [row] = await db.execute<{ id: string }>(sql`select id from users where display_name = 'Alex Rivera'`);
@@ -101,6 +105,37 @@ test("a flexible weekly goal's reminder shows on the days it rings", async ({ pa
     await expect(page.getByRole("article").filter({ hasText: "30 push-ups" })).toContainText("In-app reminder at 5:00 PM · Tue, Thu");
   } finally {
     await db.execute(sql`delete from reminders where id = ${reminder.id}`);
+  }
+});
+
+test("days picked with Natalie for an 'any days' goal's reminder become the goal's days, and calls are checked first", async () => {
+  const account = await createConfirmedUser("e2e.days");
+  try {
+    const userId = await ensureAppUserForScript(account.authUserId);
+    await db.execute(sql`update users set timezone = 'Australia/Adelaide' where id = ${userId}`);
+    const goal = await createGoal(userId, { title: "Exercise", category: "workout", cadence: "weekly", targetCount: 3, daysOfWeek: null, times: ["18:30"], durationMinutes: null, notes: null }, { type: "patient" });
+    const ctx = { userId, sessionId: null, agent: "natalie" as const, channel: "browser" as const, timezone: "Australia/Adelaide" };
+    const ask = { title: "Exercise", time: "18:30", days: [1, 3, 5], delivery: "phone", goal_id: goal.id };
+
+    // Phone calls are off: refused before the person is asked to agree.
+    const refused = await runTool(ctx, "propose_new_reminder", ask);
+    expect(refused).toMatchObject({ ok: true, result: { error: expect.stringContaining("phone calls turned on first") } });
+    const [{ count }] = await db.execute<{ count: number }>(sql`select count(*)::int as count from action_confirmations where user_id = ${userId}`);
+    expect(count).toBe(0);
+
+    await enablePhoneCalls(userId, "+61491570158");
+    const proposed = await runTool(ctx, "propose_new_reminder", ask);
+    if (!proposed.ok) throw new Error(proposed.error);
+    expect(proposed.result.summary).toContain("“Exercise” will then be planned for Mon, Wed, Fri at 6:30 PM");
+    const confirmed = await runTool(ctx, "confirm_action", { confirmation_id: proposed.result.confirmation_id });
+    expect(confirmed).toMatchObject({ ok: true, result: { done: true } });
+
+    const [after] = await db.execute<{ id: string; days_of_week: number[]; target_count: number }>(sql`select id, days_of_week, target_count from goals where user_id = ${userId} and ends_on is null`);
+    expect(after).toMatchObject({ days_of_week: [1, 3, 5], target_count: 3 });
+    const [reminder] = await db.execute<{ goal_id: string; days_of_week: number[]; local_time: string }>(sql`select goal_id, days_of_week, local_time from reminders where user_id = ${userId}`);
+    expect(reminder).toEqual({ goal_id: after.id, days_of_week: [1, 3, 5], local_time: "18:30" });
+  } finally {
+    await deleteUser(account.authUserId);
   }
 });
 
