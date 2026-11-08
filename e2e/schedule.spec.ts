@@ -59,19 +59,19 @@ test("phone calls need an explicit opt-in with a confirmed number (AC-24, AC-30,
     await expect(page.getByRole("radio", { name: /A phone call from Milo/ })).toHaveCount(0);
     await expect(page.getByText("Turn on phone calls first.")).toBeVisible();
 
-    await page.getByLabel("Your mobile number").fill("0400 000 002");
+    await page.getByLabel("Your mobile number").fill("0491 570 156");
     await page.getByRole("button", { name: "Turn on phone calls" }).click();
     await expect(page.getByText(/confirm this is your number/)).toBeVisible();
 
-    await expect(page.getByLabel("Your mobile number")).toHaveValue("0400 000 002");
+    await expect(page.getByLabel("Your mobile number")).toHaveValue("0491 570 156");
     await page.getByLabel(/This is my number/).check({ force: true });
     await page.getByRole("button", { name: "Turn on phone calls" }).click();
     await expect(page.getByText("Calls are on", { exact: true })).toBeVisible();
-    await expect(page.getByText("+614 ••••• 002")).toBeVisible();
+    await expect(page.getByText("+614 ••••• 156")).toBeVisible();
 
     const userId = await appUserId(account.authUserId);
     const consents = await db.execute<{ purpose: string; scope: { phone?: string } }>(sql`select purpose, scope from consents where user_id = ${userId} and status = 'granted'`);
-    expect(consents).toEqual([{ purpose: "outbound_calls", scope: { phone: "+61400000002" } }]);
+    expect(consents).toEqual([{ purpose: "outbound_calls", scope: { phone: "+61491570156" } }]);
 
     // A "call me now" request is queued for the phone server (not dialled by the web app).
     await page.getByRole("button", { name: "Call me now" }).click();

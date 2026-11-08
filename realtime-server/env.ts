@@ -1,7 +1,7 @@
-import { config } from "dotenv";
 import { z } from "zod";
+import { loadEnvFiles } from "@/lib/env-files";
 
-config({ path: ".env", quiet: true });
+loadEnvFiles();
 
 const e164 = z.string().regex(/^\+[1-9]\d{6,14}$/, "must be E.164, e.g. +61412345678");
 
