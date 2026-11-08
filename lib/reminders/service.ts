@@ -6,7 +6,7 @@ import { db, schema } from "@/lib/db";
 import { formatDays, formatTime12h } from "@/lib/scheduling/occurrences";
 import { scheduleNextJob } from "@/lib/scheduling/jobs";
 import { getOwnedGoal, updateGoal } from "@/lib/goals/service";
-import { hasFixedSessions } from "@/lib/goals/schedule";
+import { hasFixedSessions, takesReminderDays } from "@/lib/goals/schedule";
 
 // Milo's reminder service. Every function is scoped to the given userId, which callers take from
 // the authenticated session or a server-issued call token.
@@ -43,10 +43,14 @@ export async function getOwnedReminder(userId: string, reminderId: string) {
   return reminder ?? null;
 }
 
+export const PHONE_CALLS_OFF = "Phone reminders need phone calls turned on first, in Reminders & calls.";
+
+export async function phoneCallsAllowed(userId: string) {
+  return (await getConsentState(userId)).outbound_calls;
+}
+
 async function assertPhoneAllowed(userId: string, channel: ReminderFields["channel"]) {
-  if (channel !== "phone") return;
-  const consents = await getConsentState(userId);
-  if (!consents.outbound_calls) throw new ReminderError("Phone reminders need phone calls turned on first, in Reminders & calls.");
+  if (channel === "phone" && !(await phoneCallsAllowed(userId))) throw new ReminderError(PHONE_CALLS_OFF);
 }
 
 export function describeReminder(reminder: { title: string; localTime: string; daysOfWeek: number[]; channel: string }) {
@@ -59,7 +63,14 @@ export async function createReminder(userId: string, input: ReminderFields, acto
   if (input.goalId) {
     const owned = await getOwnedGoal(userId, input.goalId);
     if (!owned || owned.status !== "active" || owned.endsOn) throw new ReminderError("That goal wasn't found.");
-    const goal = await followedGoal(userId, input.goalId);
+    let goalId = owned.id;
+    // Picking days for an "any days" goal's reminder sets the goal's days (the proposal said so).
+    if (takesReminderDays(owned, input.daysOfWeek)) {
+      const { after } = await updateGoal(userId, owned.id, { daysOfWeek: [...new Set(input.daysOfWeek)].sort(), times: [input.localTime] }, goalActor(actor));
+      goalId = after.id;
+      fields = { ...fields, goalId };
+    }
+    const goal = await followedGoal(userId, goalId);
     // A reminder for a goal with a set schedule rings at the goal's time on the goal's days.
     if (goal) fields = { ...input, localTime: goal.times[0] ?? input.localTime, daysOfWeek: goal.daysOfWeek?.length ? goal.daysOfWeek : ALL_DAYS };
   }
@@ -84,12 +95,15 @@ export async function rescheduleReminder(userId: string, reminderId: string, cha
   const goal = await followedGoal(userId, before.goalId);
   const goalDays = goal?.cadence === "daily" && daysOfWeek.length === 7 ? null : daysOfWeek;
   const goalChanged = goal && (goal.times[0] !== localTime || JSON.stringify(goal.daysOfWeek ?? ALL_DAYS) !== JSON.stringify(daysOfWeek));
+  // Picking days for an "any days" goal's reminder sets the goal's days too.
+  const flexible = !goal && before.goalId ? await getOwnedGoal(userId, before.goalId) : null;
+  const picksDays = flexible && flexible.status === "active" && !flexible.endsOn && takesReminderDays(flexible, daysOfWeek) ? flexible : null;
 
   let after: typeof before;
   let nextDue: Date | null;
-  if (goal && goalChanged) {
+  if ((goal && goalChanged) || picksDays) {
     // The goal change already moved this reminder and its call; just read the result.
-    await updateGoal(userId, goal.id, { times: [localTime], daysOfWeek: goalDays }, goalActor(actor));
+    await updateGoal(userId, (goal ?? picksDays)!.id, { times: [localTime], daysOfWeek: goal ? goalDays : [...new Set(daysOfWeek)].sort() }, goalActor(actor));
     after = (await getOwnedReminder(userId, reminderId))!;
     const [job] = await db
       .select({ dueAt: schema.callJobs.dueAt })

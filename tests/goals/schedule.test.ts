@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { describeGoalChange, describeSchedule, retitleForTime } from "@/lib/goals/describe";
 import { guessCategory } from "@/lib/goals/categories";
-import { buildItems, countProgress, hasFixedSessions, monthEnd, plannedSlots, type GoalPlan, type SessionRow } from "@/lib/goals/schedule";
+import { buildItems, countProgress, hasFixedSessions, monthEnd, plannedSlots, takesReminderDays, type GoalPlan, type SessionRow } from "@/lib/goals/schedule";
 
 const goal = (overrides: Partial<GoalPlan>): GoalPlan => ({
   id: "g",
@@ -153,5 +153,20 @@ describe("guessCategory", () => {
     expect(guessCategory("Take my blood pressure tablets")).toBe("medication");
     expect(guessCategory("Drink 8 glasses of water")).toBe("food_drink");
     expect(guessCategory("Call my sister")).toBe("other");
+  });
+});
+
+describe("takesReminderDays", () => {
+  const flexible = { cadence: "weekly" as const, daysOfWeek: null, targetCount: 3, times: ["18:30"] };
+  it("gives an 'any days' weekly goal the days its reminder was set for, when the count matches", () => {
+    expect(takesReminderDays(flexible, [1, 3, 5])).toBe(true);
+    expect(takesReminderDays({ ...flexible, times: [] }, [5, 1, 3])).toBe(true);
+  });
+  it("leaves the goal alone otherwise", () => {
+    expect(takesReminderDays(flexible, [0, 1, 2, 3, 4, 5, 6])).toBe(false); // a daily nudge for a 3-a-week goal
+    expect(takesReminderDays(flexible, [1, 3])).toBe(false);
+    expect(takesReminderDays({ ...flexible, daysOfWeek: [2, 4, 6] }, [1, 3, 5])).toBe(false);
+    expect(takesReminderDays({ ...flexible, cadence: "monthly" }, [1, 3, 5])).toBe(false);
+    expect(takesReminderDays({ ...flexible, times: ["07:00", "18:30"] }, [1, 3, 5])).toBe(false);
   });
 });

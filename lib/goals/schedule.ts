@@ -58,6 +58,15 @@ export type CountProgress = { goalId: string; title: string; category: GoalCateg
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 const isTime = (slot: string) => /^\d{2}:\d{2}$/.test(slot);
 
+/**
+ * A flexible weekly goal ("3 times a week, any days") whose reminder is set for exactly that many
+ * days takes those days: the person has picked their days, so the calendar shows those sessions.
+ */
+export function takesReminderDays(goal: Pick<GoalPlan, "cadence" | "daysOfWeek" | "targetCount" | "times">, reminderDays: number[]) {
+  const days = new Set(reminderDays);
+  return goal.cadence === "weekly" && !goal.daysOfWeek?.length && goal.times.length <= 1 && days.size > 0 && days.size < 7 && days.size === goal.targetCount;
+}
+
 /** Goals with fixed sessions appear in day slots; flexible weekly and monthly goals are counted instead. */
 export function hasFixedSessions(goal: Pick<GoalPlan, "cadence" | "daysOfWeek">) {
   return goal.cadence === "daily" || (goal.cadence === "weekly" && Array.isArray(goal.daysOfWeek) && goal.daysOfWeek.length > 0);
