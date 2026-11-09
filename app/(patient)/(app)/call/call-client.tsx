@@ -6,21 +6,17 @@ import { AiTag, Avatar, Icon } from "@/components/kindly/parts";
 import { Button } from "@/components/ui/button";
 import { AGENTS } from "@/lib/agents/directory";
 import type { ToolName } from "@/lib/agents/tools/specs";
-import {
-  agentKeyOf,
-  createVoiceAgents,
-  REALTIME_VOICE,
-  VOICE_AGENT_KEYS,
-  type ToolOutcome,
-  type VoiceAgentKey,
-} from "@/lib/agents/voice-agents";
+import { createVoiceAgent, VOICE_AGENT_KEYS, type CallOpening, type ToolOutcome, type VoiceAgentKey } from "@/lib/agents/voice-agents";
 import { SAFETY_CONTACTS } from "@/lib/safety/contacts";
-import { crossesPrivacyBoundary, pruneForHandoff } from "@/lib/voice/privacy";
+import { handoffBriefing, type Turn } from "@/lib/voice/privacy";
 
 type Status = "idle" | "connecting" | "live" | "ended" | "error";
 type Caption = { id: string; who: string; text: string };
+type Started = { sessionId: string; clientSecret: string; model: string; personName?: string | null; met?: VoiceAgentKey[] };
 
 const MAX_CALL_MS = 10 * 60_000;
+// Longest wait for the "one moment" line to finish before the next companion joins.
+const HOLD_LINE_MAX_MS = 8_000;
 
 const THINGS_TO_SAY = ["Move my walk to 5 PM", "I did my walk", "Put me through to Sarah"];
 
@@ -33,6 +29,16 @@ const ERRORS: Record<string, string> = {
 
 async function postJson(path: string, body: unknown, keepalive = false) {
   return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), keepalive });
+}
+
+async function requestSecret(body: Record<string, unknown>): Promise<Started | { error: string }> {
+  try {
+    const response = await postJson("/api/voice/session", body);
+    if (!response.ok) return (await response.json().catch(() => null)) ?? { error: "voice_unavailable" };
+    return await response.json();
+  } catch {
+    return { error: "voice_unavailable" };
+  }
 }
 
 export function CallClient({ startAgent, topic }: { startAgent: VoiceAgentKey; topic: "unwell" | "plan" | null }) {
@@ -48,25 +54,32 @@ export function CallClient({ startAgent, topic }: { startAgent: VoiceAgentKey; t
   const [typed, setTyped] = useState("");
   const [joined, setJoined] = useState<{ agent: VoiceAgentKey; at: Date }[]>([]);
 
+  // Each companion has its own realtime session (its own voice); this is the current one.
   const sessionRef = useRef<RealtimeSession | null>(null);
   const sessionIdRef = useRef<string | null>(null);
-  const agentsRef = useRef<ReturnType<typeof createVoiceAgents>["agents"] | null>(null);
-  const uiSwitchRef = useRef(false);
+  const modelRef = useRef("");
+  const familiarRef = useRef<{ personName: string | null; met: Set<VoiceAgentKey> }>({ personName: null, met: new Set() });
+  const switchingRef = useRef<Promise<void> | null>(null);
+  const playbackRef = useRef<{ started: () => void; stopped: () => void } | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const speakingRef = useRef(false);
+  const mutedRef = useRef(false);
   const activeRef = useRef<VoiceAgentKey>(startAgent);
-  // What was said, tagged with who was speaking, kept only in this tab. Sent once at the end so a
-  // summary can be written (if the person turned summaries on); the server doesn't keep it.
-  const transcriptRef = useRef(new Map<string, { agent: VoiceAgentKey; role: "user" | "assistant"; text: string }>());
+  // What was said, tagged with who was speaking, kept only in this tab. Used to brief the next
+  // companion (see handoffBriefing) and sent once at the end so a summary can be written (if the
+  // person turned summaries on); the server doesn't keep it.
+  const transcriptRef = useRef(new Map<string, Turn>());
 
   const endCall = useCallback((reason?: string) => {
     if (timerRef.current) clearTimeout(timerRef.current);
-    sessionRef.current?.close();
+    const session = sessionRef.current;
     sessionRef.current = null;
+    session?.close();
     if (sessionIdRef.current) {
       void postJson("/api/voice/events", { type: "end", sessionId: sessionIdRef.current, transcript: transcriptForSummary(transcriptRef.current) }, true);
     }
     sessionIdRef.current = null;
+    switchingRef.current = null;
     setSpeaking(false);
     setSwitchingTo(null);
     setStatus("ended");
@@ -83,73 +96,45 @@ export function CallClient({ startAgent, topic }: { startAgent: VoiceAgentKey; t
     };
   }, [endCall]);
 
-  async function startCall() {
-    setError(null);
-    setCaptions([]);
-    setSafetyMessage(null);
-    setActive(startAgent);
-    activeRef.current = startAgent;
-    transcriptRef.current = new Map();
-    setJoined([{ agent: startAgent, at: new Date() }]);
-    setStatus("connecting");
-
-    const response = await postJson("/api/voice/session", { agent: startAgent, topic });
-    if (!response.ok) {
-      const { error: code } = await response.json().catch(() => ({ error: "voice_unavailable" }));
-      setError(ERRORS[code] ?? ERRORS.voice_unavailable);
-      setStatus("error");
-      return;
-    }
-    const { sessionId, clientSecret, model } = (await response.json()) as { sessionId: string; clientSecret: string; model: string };
-    sessionIdRef.current = sessionId;
-
-    const { agents, start } = createVoiceAgents({
-      startAgent,
-      opening: { reason: "user_started", topic },
+  async function connectCompanion(agent: VoiceAgentKey, opening: CallOpening, clientSecret: string) {
+    const sessionId = sessionIdRef.current!;
+    const familiar = familiarRef.current;
+    const voiceAgent = createVoiceAgent({
+      agent,
+      opening,
+      familiarity: { personName: familiar.personName, met: familiar.met.has(agent) },
       // Tools run on the server, which checks this session belongs to the signed-in user.
-      invoke: async (agent, name: ToolName, input) => {
-        const result = await postJson("/api/voice/tools", { sessionId, agent, name, input });
+      invoke: async (who, name: ToolName, input) => {
+        const result = await postJson("/api/voice/tools", { sessionId, agent: who, name, input });
         if (!result.ok) return { ok: false, error: "That didn't work. Nothing was changed." } satisfies ToolOutcome;
         return (await result.json()) as ToolOutcome;
       },
+      onTransfer: (to, request) => transfer(agent, to, request, "voice"),
     });
-    agentsRef.current = agents;
+    familiar.met.add(agent);
 
-    const session = new RealtimeSession(start, {
+    const session = new RealtimeSession(voiceAgent, {
       transport: "webrtc",
-      model,
+      model: modelRef.current,
       tracingDisabled: true,
-      config: {
-        audio: {
-          input: { transcription: { model: "gpt-4o-mini-transcribe" } },
-          output: { voice: REALTIME_VOICE },
-        },
-      },
+      config: { audio: { input: { transcription: { model: "gpt-4o-mini-transcribe" } } } },
     });
     sessionRef.current = session;
+    activeRef.current = agent;
 
-    session.on("agent_handoff", (_context, fromAgent, toAgent) => {
-      const from = agentKeyOf(fromAgent);
-      const to = agentKeyOf(toAgent);
-      if (crossesPrivacyBoundary(from, to)) session.updateHistory(pruneForHandoff);
-      setActive(to);
-      activeRef.current = to;
-      setJoined((current) => [...current, { agent: to, at: new Date() }]);
-      setSwitchingTo(to);
-      setCaptions([]);
-      void postJson("/api/voice/events", { type: "handoff", sessionId, from, to, via: uiSwitchRef.current ? "ui" : "voice" });
-      uiSwitchRef.current = false;
-    });
     // With WebRTC the browser plays audio itself, so speaking state comes from the server's
     // playback events rather than the SDK's audio events.
     session.on("transport_event", (event) => {
+      if (sessionRef.current !== session) return;
       if (event.type === "output_audio_buffer.started") {
         speakingRef.current = true;
         setSpeaking(true);
         setSwitchingTo(null);
+        playbackRef.current?.started();
       } else if (event.type === "output_audio_buffer.stopped" || event.type === "output_audio_buffer.cleared") {
         speakingRef.current = false;
         setSpeaking(false);
+        playbackRef.current?.stopped();
       }
     });
     session.on("agent_tool_end", (_context, _agent, calledTool, result) => {
@@ -164,11 +149,9 @@ export function CallClient({ startAgent, topic }: { startAgent: VoiceAgentKey; t
       for (const item of history) {
         if (item.type !== "message" || item.role === "system") continue;
         const text = messageText(item);
-        if (!text) continue;
-        const known = transcriptRef.current.get(item.itemId);
-        transcriptRef.current.set(item.itemId, { agent: known?.agent ?? activeRef.current, role: item.role, text });
+        if (text) transcriptRef.current.set(item.itemId, { agent, role: item.role, text });
       }
-      setCaptions(toCaptions(history, transcriptRef.current));
+      if (sessionRef.current === session) setCaptions(toCaptions(history, agent));
     });
     // Non-fatal API errors (e.g. cancelling a response that already finished) don't end the call;
     // a dropped connection is handled below.
@@ -177,8 +160,34 @@ export function CallClient({ startAgent, topic }: { startAgent: VoiceAgentKey; t
       if (state === "disconnected" && sessionRef.current === session) endCall("The call was disconnected.");
     });
 
+    await session.connect({ apiKey: clientSecret });
+    if (sessionRef.current !== session) return session.close();
+    if (mutedRef.current) session.mute(true);
+    // The companion speaks first: a greeting, or picking up what the person asked for.
+    session.transport.sendEvent({ type: "response.create" });
+  }
+
+  async function startCall() {
+    setError(null);
+    setCaptions([]);
+    setSafetyMessage(null);
+    setActive(startAgent);
+    transcriptRef.current = new Map();
+    setJoined([{ agent: startAgent, at: new Date() }]);
+    setStatus("connecting");
+
+    const started = await requestSecret({ agent: startAgent, topic });
+    if ("error" in started) {
+      setError(ERRORS[started.error] ?? ERRORS.voice_unavailable);
+      setStatus("error");
+      return;
+    }
+    sessionIdRef.current = started.sessionId;
+    modelRef.current = started.model;
+    familiarRef.current = { personName: started.personName ?? null, met: new Set(started.met ?? []) };
+
     try {
-      await session.connect({ apiKey: clientSecret });
+      await connectCompanion(startAgent, { reason: "user_started", topic }, started.clientSecret);
     } catch (connectError) {
       const denied = connectError instanceof DOMException && connectError.name === "NotAllowedError";
       endCall(denied ? ERRORS.mic_denied : ERRORS.voice_unavailable);
@@ -186,23 +195,67 @@ export function CallClient({ startAgent, topic }: { startAgent: VoiceAgentKey; t
       return;
     }
     setStatus("live");
-    session.transport.sendEvent({ type: "response.create" });
     timerRef.current = setTimeout(() => endCall("Calls end after 10 minutes. You can start a new one any time."), MAX_CALL_MS);
   }
 
-  async function switchTo(key: VoiceAgentKey) {
+  /** Waits for the current companion's last words (the "one moment" line) to finish playing. */
+  function playbackFinished() {
+    return new Promise<void>((resolve) => {
+      const finish = () => {
+        clearTimeout(cap);
+        clearTimeout(grace);
+        playbackRef.current = null;
+        resolve();
+      };
+      const cap = setTimeout(finish, HOLD_LINE_MAX_MS);
+      // Nothing playing and nothing starting soon means there's nothing to wait for.
+      const grace = speakingRef.current ? undefined : setTimeout(finish, 1200);
+      playbackRef.current = { started: () => clearTimeout(grace), stopped: finish };
+    });
+  }
+
+  function transfer(from: VoiceAgentKey, to: VoiceAgentKey, request: string, via: "voice" | "ui") {
+    // A repeated transfer call waits for the one already under way.
+    switchingRef.current ??= (async () => {
+      const sessionId = sessionIdRef.current;
+      if (!sessionId) return;
+      setSwitchingTo(to);
+      // The next companion's secret is fetched while the "one moment" line plays.
+      const [next] = await Promise.all([requestSecret({ agent: to, continueSessionId: sessionId, via }), via === "voice" ? playbackFinished() : null]);
+      if (sessionIdRef.current !== sessionId) return;
+      if ("error" in next) return endCall(ERRORS[next.error] ?? ERRORS.voice_unavailable);
+
+      const briefing = handoffBriefing({ from, to, request, turns: [...transcriptRef.current.values()] });
+      const previous = sessionRef.current;
+      sessionRef.current = null;
+      previous?.close();
+      speakingRef.current = false;
+      setSpeaking(false);
+      setActive(to);
+      setJoined((current) => [...current, { agent: to, at: new Date() }]);
+      setCaptions([]);
+      try {
+        await connectCompanion(to, { reason: "transferred", from, briefing }, next.clientSecret);
+      } catch {
+        // Unless the person ended the call while the next companion was connecting.
+        if (sessionIdRef.current === sessionId) endCall(ERRORS.voice_unavailable);
+      }
+    })().finally(() => {
+      switchingRef.current = null;
+    });
+    return switchingRef.current;
+  }
+
+  function switchTo(key: VoiceAgentKey) {
     const session = sessionRef.current;
-    const agents = agentsRef.current;
-    if (!session || !agents || key === active) return;
-    uiSwitchRef.current = true;
-    setSwitchingTo(key);
+    if (!session || key === active || switchingRef.current) return;
     if (speakingRef.current) session.interrupt();
-    await session.updateAgent(agents[key]);
-    session.transport.sendEvent({ type: "response.create" });
+    void transfer(activeRef.current, key, `The person pressed the button to talk to ${AGENTS[key].name}.`, "ui");
   }
 
   function toggleMute() {
     const next = !muted;
+    mutedRef.current = next;
     sessionRef.current?.mute(next);
     setMuted(next);
   }
@@ -403,19 +456,18 @@ function messageText(item: Extract<RealtimeItem, { type: "message" }>) {
     .trim();
 }
 
-function toCaptions(history: RealtimeItem[], speakers: Map<string, { agent: VoiceAgentKey }>): Caption[] {
+function toCaptions(history: RealtimeItem[], agent: VoiceAgentKey): Caption[] {
   const captions: Caption[] = [];
   for (const item of history) {
     if (item.type !== "message" || item.role === "system") continue;
     const text = messageText(item);
-    const agent = speakers.get(item.itemId)?.agent;
-    if (text) captions.push({ id: item.itemId, who: item.role === "user" ? "YOU" : agent ? AGENTS[agent].name.toUpperCase() : "KINDLY", text });
+    if (text) captions.push({ id: item.itemId, who: item.role === "user" ? "YOU" : AGENTS[agent].name.toUpperCase(), text });
   }
   return captions.slice(-20);
 }
 
 /** The most recent part of the conversation that fits in one small request. */
-function transcriptForSummary(map: Map<string, { agent: VoiceAgentKey; role: "user" | "assistant"; text: string }>) {
+function transcriptForSummary(map: Map<string, Turn>) {
   const segments = [...map.values()].map((segment) => ({ ...segment, text: segment.text.slice(0, 2000) }));
   let size = 0;
   const kept: typeof segments = [];

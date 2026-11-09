@@ -1,4 +1,4 @@
-import { and, eq, gt, ne, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, ne, sql } from "drizzle-orm";
 import type { AgentKey } from "@/lib/agents/directory";
 import { audit } from "@/lib/audit";
 import { db, schema } from "@/lib/db";
@@ -77,4 +77,28 @@ export async function countRecentSessions(userId: string) {
     .from(schema.callSessions)
     .where(and(eq(schema.callSessions.userId, userId), gt(schema.callSessions.startedAt, sql`now() - interval '1 hour'`)));
   return row?.count ?? 0;
+}
+
+/**
+ * What a companion should know before greeting someone: the name they asked to be called, and
+ * which companions they've spoken with before (they introduce themselves only the first time).
+ */
+export async function callerContext(userId: string, currentSessionId: string | null) {
+  const [profile] = await db
+    .select({ nickname: schema.patientProfiles.nickname, displayName: schema.users.displayName })
+    .from(schema.users)
+    .leftJoin(schema.patientProfiles, eq(schema.patientProfiles.userId, schema.users.id))
+    .where(eq(schema.users.id, userId));
+  const events = await db
+    .selectDistinct({ agent: schema.agentEvents.agent })
+    .from(schema.agentEvents)
+    .where(
+      and(
+        eq(schema.agentEvents.userId, userId),
+        inArray(schema.agentEvents.eventType, ["session_started", "handoff"]),
+        currentSessionId ? sql`${schema.agentEvents.sessionId} is distinct from ${currentSessionId}` : undefined,
+      ),
+    );
+  const name = (profile?.nickname ?? profile?.displayName?.split(" ")[0] ?? "").replace(/[^\p{L}\p{M}' -]/gu, "").trim().slice(0, 40);
+  return { personName: name || null, met: events.map((event) => event.agent) as AgentKey[] };
 }

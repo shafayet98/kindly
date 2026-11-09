@@ -13,7 +13,7 @@ A voice-first, multi-agent health and wellbeing companion. Built for the Future 
 - **Web app:** Next.js 16 (App Router), React 19, Tailwind CSS 4
 - **Auth:** Supabase Auth, email + password (email confirmation is off for the MVP; the confirmation flow still works if it's turned on)
 - **Database:** Supabase Postgres via Drizzle ORM. Row-level security is on for every table with no policies, so the Supabase Data API exposes nothing; all access goes through server code that checks ownership.
-- **Voice:** OpenAI Realtime (`@openai/agents`) — Milo, Natalie and Sarah with same-call handoffs
+- **Voice:** OpenAI Realtime (`@openai/agents`) — Milo, Natalie and Sarah, each in their own voice, with same-call handoffs
 - **Phone:** Twilio Programmable Voice + Media Streams, bridged by a Fastify server (`realtime-server/`)
 
 ## Setup
@@ -65,15 +65,17 @@ The scheduler only runs when `SCHEDULER_ENABLED=true`, so starting the server an
 | `pnpm voice:smoke:health` | Natalie logs a check-in, corrects it, asks Iris for progress and agrees a smaller goal with Theo (real Realtime API; run `pnpm demo:reset` after) |
 | `pnpm safety:smoke` | Emergency and suicidal-distress messages trigger the predefined safety workflow, dosing advice is declined, prompt injection can't reach other users (real Realtime API) |
 | `pnpm summary:smoke` | Conversation summaries: Sarah's part excluded by default, included when opted in, injected instructions ignored (real model) |
-| `pnpm phone:smoke` | Drives the Twilio media-stream bridge with a simulated Twilio client: forged/replayed tokens rejected, Milo audio returned |
+| `pnpm phone:smoke` | Drives the Twilio media-stream bridge with a simulated Twilio client: forged/replayed tokens rejected, Milo audio returned, and a transfer to Natalie (hold line played first, then her own voice) |
 | `pnpm db:generate` / `pnpm db:migrate` | Create / apply Drizzle migrations |
 
 ## Voice architecture
 
-- Agents (`lib/agents/voice-agents.ts`) are defined once and used by both the phone server and the browser.
+- Agents (`lib/agents/voice-agents.ts`) are defined once and used by both the phone server and the browser. Each companion has its own voice (`VOICES`: Milo `cedar`, Natalie `marin`, Sarah `shimmer`).
+- **Transfers:** a realtime session can't change voice once it has spoken, so each companion runs in its own session. To transfer, the companion says a short "one moment" line and calls `transfer_to_<name>`; once that line has played (Twilio playback marks on the phone, `output_audio_buffer.stopped` in the browser) the session closes and the next companion's session starts, briefed by `handoffBriefing` (`lib/voice/privacy.ts`). On the phone the same Twilio stream is shared through `TwilioLeg`; in the browser `/api/voice/session` issues the next secret with `continueSessionId` and records the handoff (at most 12 per call).
+- **Greetings:** companions introduce themselves (and say they're an AI) only the first time a person meets them (`callerContext` in `lib/voice/sessions.ts`). After that they greet the person by name. Phone calls still say who's calling ("Hi Alex, it's Milo from Kindly").
 - Tool **specs** (`lib/agents/tools/specs.ts`) are shared; tool **implementations** (`handlers.ts`) run only on the server through `runTool`, which enforces the per-agent allowlist and input schema. The user is always taken from the authenticated session (browser) or the server-issued call token (phone), never from model output.
 - Browser calls use WebRTC with a 60-second OpenAI client secret from `/api/voice/session` (consent + hourly limit checked). Tool calls go to `/api/voice/tools`, which checks the session belongs to the signed-in user.
-- Moving into or out of Sarah deletes earlier conversation items from the live model context (`lib/voice/privacy.ts`).
+- Into or out of Sarah, the next companion gets only the request and the person's last words; between Milo and Natalie it gets the recent conversation, never Sarah's part (`lib/voice/privacy.ts`).
 - Only structured events are stored (`call_sessions`, `agent_events`): no audio, no transcripts.
 
 ## Goals and the weekly calendar
