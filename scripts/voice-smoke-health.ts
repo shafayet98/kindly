@@ -19,7 +19,7 @@ const toolCalls: string[] = [];
 const start = createVoiceAgent({
   agent: "natalie",
   opening: { reason: "user_started" },
-    familiarity: { personName: "Alex", met: true },
+    familiarity: { personName: "Alex", met: ["milo", "natalie", "sarah"] },
     // These checks stay with one companion; a transfer would show up as a missing reply.
     onTransfer: async () => undefined,
   invoke: async (agent, name, input) => {

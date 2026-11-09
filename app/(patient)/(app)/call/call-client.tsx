@@ -102,7 +102,7 @@ export function CallClient({ startAgent, topic }: { startAgent: VoiceAgentKey; t
     const voiceAgent = createVoiceAgent({
       agent,
       opening,
-      familiarity: { personName: familiar.personName, met: familiar.met.has(agent) },
+      familiarity: { personName: familiar.personName, met: [...familiar.met] },
       // Tools run on the server, which checks this session belongs to the signed-in user.
       invoke: async (who, name: ToolName, input) => {
         const result = await postJson("/api/voice/tools", { sessionId, agent: who, name, input });
@@ -111,6 +111,7 @@ export function CallClient({ startAgent, topic }: { startAgent: VoiceAgentKey; t
       },
       onTransfer: (to, request) => transfer(agent, to, request, "voice"),
     });
+    // Met from now on: the next companion won't explain who this one is.
     familiar.met.add(agent);
 
     const session = new RealtimeSession(voiceAgent, {

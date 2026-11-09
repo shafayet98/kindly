@@ -19,8 +19,8 @@ export type ToolOutcome = { ok: true; result: Record<string, unknown> } | { ok: 
 export type ToolInvoker = (agent: AgentKey, name: ToolName, input: unknown) => Promise<ToolOutcome>;
 /** Puts the person through to another companion. Resolves once the current session has closed. */
 export type TransferHandler = (to: VoiceAgentKey, request: string) => Promise<void>;
-/** Whether the person has spoken with this companion before, and what they like to be called. */
-export type Familiarity = { personName: string | null; met: boolean };
+/** What the person likes to be called, and which companions they've spoken with before (this one included). */
+export type Familiarity = { personName: string | null; met: VoiceAgentKey[] };
 
 export type CallOpening =
   | { reason: "reminder_call"; reminderTitle: string }
@@ -54,9 +54,12 @@ from now on (propose_plan_adjustment). If it's unclear, ask "Just today, or ever
 Medication goals: you may remind, ask if they took it, and record it. Never comment on doses, timing changes or
 whether to take a medicine; for that, suggest their GP or pharmacist.
 The team: Milo (reminders and calls), Natalie (health and habits), Sarah (emotional wellbeing).
-If the person asks for another team member, put them through. First say one short line so they know to hold, naming
-who's coming, like "One moment, I'll put you through to Sarah." Then call the matching transfer tool with a one-sentence
-note of what they want. Say nothing after that; the call stays connected. Never mention tools or transfers failing.
+If the person asks for another team member, put them through. First tell them who you're getting for them, so the short
+pause isn't a surprise: one short sentence in your own words and style, the way a friendly person passes the phone,
+fitting what they just said. Don't use a stock phrase, don't say it the same way each time, and don't mention
+connections, switching or technology. Only say what the other companion does if the person hasn't met them (see TEAM).
+Then call the matching transfer tool with a one-sentence note of what they want. Say nothing after that; the call stays
+connected. Never mention tools or transfers failing.
 `.trim();
 
 const PERSONAS: Record<VoiceAgentKey, string> = {
@@ -94,35 +97,45 @@ Never pass on details of this conversation to other companions; if transferring,
 You can keep a short private note (save_wellbeing_note) only if the person asks or clearly agrees when you offer.`,
 };
 
-function openingInstructions(opening: CallOpening, agent: VoiceAgentKey, { personName, met }: Familiarity) {
+function openingInstructions(opening: CallOpening, agent: VoiceAgentKey, { personName, met: metList }: Familiarity) {
+  const met = metList.includes(agent);
   const name = AGENTS[agent].name;
-  const hi = personName ? `Hi ${personName}` : "Hi";
+  const byName = personName ? `They like to be called ${personName}; use their name in the greeting.` : "";
   // Introductions (who you are, that you're an AI) happen the first time someone meets a companion.
-  const known = `You've spoken with them before, so don't introduce yourself, say you're an AI or explain what you do, unless they ask.`;
+  const known = `You've spoken with them before, so don't introduce yourself, say you're an AI or explain what you do, unless they ask. ${byName}`;
+  const natural = "Greet them naturally, in your own words and style, and keep it short.";
   switch (opening.reason) {
     case "reminder_call":
       return `This is a phone call Kindly placed because the person asked for a reminder: "${opening.reminderTitle}".
-${met ? `${known} They still need to know who's calling, so open with: "${hi}, it's ${name} from Kindly."` : `Open with: "Hi, it's ${name} from Kindly, an AI assistant."`}
-Then mention the reminder and ask if it still works for them today.`;
+${met ? `${known} They still need to know who's calling, so say your name and that you're calling from Kindly.` : `Open by saying it's ${name} from Kindly, an AI assistant.`}
+Then mention the reminder and ask if it still works for them today. ${natural}`;
     case "test_call":
-      return `This is a test phone call the person asked for. ${met ? `${known} Open with: "${hi}, it's ${name} from Kindly. How can I help?"` : `Open with: "Hi, it's ${name} from Kindly, an AI assistant. How can I help?"`}`;
+      return `This is a test phone call the person asked for. ${met ? `${known} Say your name and that you're calling from Kindly, then ask how you can help.` : `Open by saying it's ${name} from Kindly, an AI assistant, and ask how you can help.`} ${natural}`;
     case "transferred":
       return `You've just been put through from ${AGENTS[opening.from].name}, who asked the person to hold for you.
 ${opening.briefing}
-${met ? `${known} Just say "${hi}, ${name} here." and pick up what they want straight away.` : `Greet them with your name and, in a few words, what you help with as Kindly's AI ${AGENTS[agent].role.toLowerCase()} companion. Then pick up what they want.`}`;
+They've just heard another voice, so say your name as you greet them. ${met ? `${known} Then pick up what they want straight away.` : `Say, in a few words, what you help with as Kindly's AI ${AGENTS[agent].role.toLowerCase()} companion, then pick up what they want.`} ${natural}`;
     case "user_started":
       if (opening.topic === "unwell") {
-        return `The person opened Kindly because they're feeling unwell. ${met ? `${known} Greet them by name.` : `Open by saying you're ${name}, an AI.`} Say that you
+        return `The person opened Kindly because they're feeling unwell. ${met ? known : `Open by saying you're ${name}, an AI.`} Say that you
 can't diagnose or rule out an emergency, and that if it might be an emergency they should call ${SAFETY_CONTACTS.emergency.number} now.
 Then gently ask them to describe how they feel.`;
       }
       if (opening.topic === "plan") {
-        return `The person wants help planning their day. ${met ? `${known} Open with something like "${hi}, what's on today?"` : `Open by saying you're ${name} from Kindly, an AI, and ask what's on today.`}`;
+        return `The person wants help planning their day. ${met ? `${known} Ask what's on today.` : `Open by saying you're ${name} from Kindly, an AI, and ask what's on today.`} ${natural}`;
       }
       return met
-        ? `The person started this conversation. ${known} Open with a few words, like "${hi}, how can I help?"`
+        ? `The person started this conversation. ${known} ${natural} Ask how you can help.`
         : `The person started this conversation. Open with a short greeting: you're ${name} from Kindly, an AI companion. Ask how you can help.`;
   }
+}
+
+/** Who the person already knows, so a transfer explains only companions they haven't met. */
+function teamNote(agent: VoiceAgentKey, met: VoiceAgentKey[]) {
+  const others = VOICE_AGENT_KEYS.filter((key) => key !== agent);
+  return `TEAM:\n${others
+    .map((key) => `- ${AGENTS[key].name} (${AGENTS[key].role}): ${met.includes(key) ? "they've met before; just say you're getting them." : "they haven't met yet; a few words on what they do helps."}`)
+    .join("\n")}`;
 }
 
 const TRANSFER_INPUT = z.object({
@@ -149,7 +162,7 @@ export function createVoiceAgent({
   const transfers = VOICE_AGENT_KEYS.filter((key) => key !== agent).map((to) =>
     tool({
       name: `transfer_to_${to}`,
-      description: `Put the person through to ${AGENTS[to].name} (${AGENTS[to].role}: ${AGENTS[to].helpsWith}). Say a short "one moment" line first.`,
+      description: `Put the person through to ${AGENTS[to].name} (${AGENTS[to].role}: ${AGENTS[to].helpsWith}). First tell them, in your own words, who you're getting.`,
       parameters: TRANSFER_INPUT,
       // Resolves only after this session has closed, so the SDK never asks this companion to speak again.
       execute: async ({ request }) => {
@@ -161,7 +174,7 @@ export function createVoiceAgent({
   return new RealtimeAgent({
     name: AGENTS[agent].name,
     voice: VOICES[agent],
-    instructions: [SHARED_RULES, PERSONAS[agent], `CALL OPENING:\n${openingInstructions(opening, agent, familiarity)}`].join("\n\n"),
+    instructions: [SHARED_RULES, PERSONAS[agent], teamNote(agent, familiarity.met), `CALL OPENING:\n${openingInstructions(opening, agent, familiarity)}`].join("\n\n"),
     tools: [
       ...toolsForAgent(agent).map((spec) =>
         tool({
