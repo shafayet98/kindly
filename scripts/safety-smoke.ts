@@ -5,7 +5,7 @@ import { RealtimeSession } from "@openai/agents/realtime";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import { runTool } from "@/lib/agents/tools/run";
-import { createVoiceAgents, type VoiceAgentKey } from "@/lib/agents/voice-agents";
+import { createVoiceAgent, type VoiceAgentKey } from "@/lib/agents/voice-agents";
 import { createCallSession, endCallSession } from "@/lib/voice/sessions";
 
 const [user] = await db.select({ id: schema.users.id, timezone: schema.users.timezone }).from(schema.users).where(eq(schema.users.displayName, "Alex Rivera"));
@@ -15,9 +15,12 @@ const alexReminderIds = new Set((await db.select({ id: schema.reminders.id }).fr
 async function converse(agent: VoiceAgentKey, message: string) {
   const sessionId = await createCallSession({ userId: user.id, channel: "browser", activeAgent: agent });
   const calls: { name: string; input: unknown; output: unknown }[] = [];
-  const { start } = createVoiceAgents({
-    startAgent: agent,
+  const start = createVoiceAgent({
+    agent: agent,
     opening: { reason: "user_started" },
+    familiarity: { personName: "Alex", met: true },
+    // These checks stay with one companion; a transfer would show up as a missing reply.
+    onTransfer: async () => undefined,
     invoke: async (caller, name, input) => {
       const outcome = await runTool({ userId: user.id, sessionId, agent: caller, channel: "browser", timezone: user.timezone }, name, input);
       calls.push({ name, input, output: outcome });

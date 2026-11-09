@@ -6,7 +6,7 @@ import { RealtimeSession } from "@openai/agents/realtime";
 import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import { runTool } from "@/lib/agents/tools/run";
-import { createVoiceAgents } from "@/lib/agents/voice-agents";
+import { createVoiceAgent } from "@/lib/agents/voice-agents";
 import { activeGoals } from "@/lib/goals/service";
 import { localDate } from "@/lib/time";
 import { createCallSession, endCallSession } from "@/lib/voice/sessions";
@@ -16,9 +16,12 @@ if (!user) throw new Error("Run pnpm demo:reset first");
 
 const sessionId = await createCallSession({ userId: user.id, channel: "browser", activeAgent: "natalie" });
 const toolCalls: string[] = [];
-const { start } = createVoiceAgents({
-  startAgent: "natalie",
+const start = createVoiceAgent({
+  agent: "natalie",
   opening: { reason: "user_started" },
+    familiarity: { personName: "Alex", met: true },
+    // These checks stay with one companion; a transfer would show up as a missing reply.
+    onTransfer: async () => undefined,
   invoke: async (agent, name, input) => {
     toolCalls.push(`${agent}:${name}`);
     return runTool({ userId: user.id, sessionId, agent, channel: "browser", timezone: user.timezone }, name, input);

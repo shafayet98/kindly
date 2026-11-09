@@ -1,12 +1,13 @@
-import type { WebSocket } from "ws";
+import type { RawData, WebSocket } from "ws";
 import { RealtimeSession } from "@openai/agents/realtime";
 import { TwilioRealtimeTransportLayer } from "@openai/agents-extensions";
 import type { FastifyBaseLogger } from "fastify";
 import { runTool } from "@/lib/agents/tools/run";
-import { agentKeyOf, createVoiceAgents, REALTIME_VOICE, type CallOpening, type VoiceAgentKey } from "@/lib/agents/voice-agents";
-import { createCallSession, endCallSession, MAX_SESSION_MINUTES, recordHandoff } from "./sessions";
+import { createVoiceAgent, type CallOpening, type VoiceAgentKey } from "@/lib/agents/voice-agents";
+import { callerContext, createCallSession, endCallSession, MAX_SESSION_MINUTES, recordHandoff } from "./sessions";
 import { summarizeConversation, type TranscriptSegment } from "@/lib/conversations/summary";
-import { crossesPrivacyBoundary, pruneForHandoff } from "./privacy";
+import { handoffBriefing } from "./privacy";
+import { TwilioLeg } from "./twilio-leg";
 
 /** What a valid stream token proves: which call this is and whose it is. */
 export type AuthorizedCall = {
@@ -23,26 +24,35 @@ type Options = {
   model: string;
   log: FastifyBaseLogger;
   authorize: (streamToken: string | undefined, callSid: string | undefined) => AuthorizedCall | null;
+  // Test hook (phone:smoke): sees each companion's session as it connects.
+  onSession?: (agent: VoiceAgentKey, session: RealtimeSession) => void;
 };
 
 const START_TIMEOUT_MS = 10_000;
+// Longest wait for the "one moment" line to finish playing before the next companion joins.
+const HOLD_LINE_MAX_MS = 8_000;
+
+type Segment = { agent: VoiceAgentKey; leg: TwilioLeg; session: RealtimeSession };
 
 /**
- * Bridges one Twilio Media Stream to an OpenAI RealtimeSession running the Kindly voice agents.
- * Nothing is sent to OpenAI until the stream proves it belongs to a call Kindly placed.
+ * Bridges one Twilio Media Stream to the Kindly voice agents, one realtime session per companion
+ * (each has its own voice). Nothing is sent to OpenAI until the stream proves it belongs to a call
+ * Kindly placed.
  */
-export function handleTwilioMediaStream(socket: WebSocket, { apiKey, model, log, authorize }: Options) {
-  // Created immediately so it sees Twilio's `start` event, which carries the streamSid.
-  const transport = new TwilioRealtimeTransportLayer({ twilioWebSocket: socket });
-  let session: RealtimeSession | null = null;
+export function handleTwilioMediaStream(socket: WebSocket, { apiKey, model, log, authorize, onSession }: Options) {
   let call: AuthorizedCall | null = null;
   let sessionId: string | null = null;
-  let started = false;
+  let startMessage: RawData | null = null;
+  let current: Segment | null = null;
+  let switching: Promise<void> | null = null;
+  let closed = false;
   const openedAt = Date.now();
   const transcript = new Map<string, TranscriptSegment>();
+  const metThisCall = new Set<VoiceAgentKey>();
+  let context: Awaited<ReturnType<typeof callerContext>> = { personName: null, met: [] };
 
   const startTimer = setTimeout(() => {
-    if (!started) {
+    if (!startMessage) {
       log.warn("media stream sent no start event; closing");
       socket.close(1008, "start timeout");
     }
@@ -51,8 +61,79 @@ export function handleTwilioMediaStream(socket: WebSocket, { apiKey, model, log,
   // Hard stop in case Twilio's own time limit is misconfigured.
   const maxDurationTimer = setTimeout(() => socket.close(1000, "max duration"), MAX_SESSION_MINUTES * 60_000);
 
+  async function connectCompanion(agent: VoiceAgentKey, opening: CallOpening) {
+    const authorized = call!;
+    const currentSessionId = sessionId!;
+    const leg = new TwilioLeg(socket);
+    const transport = new TwilioRealtimeTransportLayer({ twilioWebSocket: leg as never });
+    // The transport learns the stream id from Twilio's start event, which arrived before this leg.
+    leg.deliver(startMessage!);
+
+    const voiceAgent = createVoiceAgent({
+      agent,
+      opening,
+      familiarity: { personName: context.personName, met: context.met.includes(agent) || metThisCall.has(agent) },
+      invoke: (who, name, input) => runTool({ userId: authorized.userId, sessionId: currentSessionId, agent: who, channel: "phone", timezone: authorized.timezone }, name, input),
+      onTransfer: (to, request) => transfer(agent, to, request),
+    });
+    metThisCall.add(agent);
+    const session = new RealtimeSession(voiceAgent, {
+      transport,
+      model,
+      tracingDisabled: true,
+      config: { audio: { input: { transcription: { model: "gpt-4o-mini-transcribe" } } } },
+    });
+    const segment: Segment = { agent, leg, session };
+
+    // Kept in memory for this call only, to write a summary at the end if the person wants one.
+    session.on("history_updated", (history) => {
+      for (const item of history) {
+        if (item.type !== "message" || item.role === "system") continue;
+        const text = item.content.map((part) => ("transcript" in part && part.transcript) || ("text" in part && part.text) || "").join(" ").trim();
+        if (text) transcript.set(item.itemId, { agent, role: item.role, text: text.slice(0, 2000) });
+      }
+    });
+    session.on("error", (event) => {
+      if (current === segment) log.error({ callSid: authorized.callSid, agent, err: describeError(event.error) }, "realtime session error");
+    });
+
+    current = segment;
+    await session.connect({ apiKey });
+    if (closed) return session.close();
+    onSession?.(agent, session);
+    log.info({ callSid: authorized.callSid, agent }, "voice session connected");
+    // The companion speaks first: the caller who placed the call, or the one who was asked for.
+    session.transport.sendEvent({ type: "response.create" });
+  }
+
+  function transfer(from: VoiceAgentKey, to: VoiceAgentKey, request: string) {
+    // A repeated transfer call waits for the one already under way.
+    switching ??= (async () => {
+      const segment = current;
+      if (!segment || closed) return;
+      await segment.leg.playbackFinished(HOLD_LINE_MAX_MS);
+      if (closed) return;
+      const briefing = handoffBriefing({ from, to, request, turns: [...transcript.values()] });
+      segment.leg.detach();
+      segment.session.close();
+      log.info({ callSid: call!.callSid, from, to }, "agent handoff");
+      void recordHandoff(sessionId!, call!.userId, from, to, "voice").catch((error) =>
+        log.error({ err: error instanceof Error ? error.message : "unknown" }, "failed to record handoff"),
+      );
+      try {
+        await connectCompanion(to, { reason: "transferred", from, briefing });
+      } catch (error) {
+        log.error({ callSid: call!.callSid, to, err: describeError(error) }, "failed to connect next companion");
+        socket.close(1011, "realtime unavailable");
+      }
+    })().finally(() => {
+      switching = null;
+    });
+    return switching;
+  }
+
   socket.on("message", async (raw) => {
-    if (started) return;
+    if (startMessage) return current?.leg.deliver(raw);
     let message: { event?: string; start?: { callSid?: string; customParameters?: Record<string, string> } };
     try {
       message = JSON.parse(raw.toString());
@@ -60,7 +141,7 @@ export function handleTwilioMediaStream(socket: WebSocket, { apiKey, model, log,
       return;
     }
     if (message.event !== "start") return;
-    started = true;
+    startMessage = raw;
     clearTimeout(startTimer);
 
     call = authorize(message.start?.customParameters?.streamToken, message.start?.callSid);
@@ -79,55 +160,8 @@ export function handleTwilioMediaStream(socket: WebSocket, { apiKey, model, log,
         twilioCallSid: authorized.callSid,
         callJobId: authorized.callJobId,
       });
-      const currentSessionId = sessionId;
-      let activeAgent: VoiceAgentKey = authorized.startAgent;
-
-      const { start } = createVoiceAgents({
-        startAgent: authorized.startAgent,
-        opening: authorized.opening,
-        invoke: (agent, name, input) =>
-          runTool({ userId: authorized.userId, sessionId: currentSessionId, agent, channel: "phone", timezone: authorized.timezone }, name, input),
-      });
-
-      session = new RealtimeSession(start, {
-        transport,
-        model,
-        tracingDisabled: true,
-        config: { audio: { input: { transcription: { model: "gpt-4o-mini-transcribe" } }, output: { voice: REALTIME_VOICE } } },
-      });
-      const liveSession = session;
-
-      // Kept in memory for this call only, to write a summary at the end if the person wants one.
-      liveSession.on("history_updated", (history) => {
-        for (const item of history) {
-          if (item.type !== "message" || item.role === "system") continue;
-          const text = item.content.map((part) => ("transcript" in part && part.transcript) || ("text" in part && part.text) || "").join(" ").trim();
-          if (!text) continue;
-          const known = transcript.get(item.itemId);
-          transcript.set(item.itemId, { agent: known?.agent ?? activeAgent, role: item.role, text: text.slice(0, 2000) });
-        }
-      });
-
-      liveSession.on("agent_handoff", (_context, fromAgent, toAgent) => {
-        const from = agentKeyOf(fromAgent);
-        const to = agentKeyOf(toAgent);
-        // Synchronous, so the deletions reach the model before the new agent's first response.
-        if (crossesPrivacyBoundary(from, to)) liveSession.updateHistory(pruneForHandoff);
-        activeAgent = to;
-        log.info({ callSid: authorized.callSid, from, to }, "agent handoff");
-        void recordHandoff(currentSessionId, authorized.userId, from, to, "voice").catch((error) =>
-          log.error({ err: error instanceof Error ? error.message : "unknown" }, "failed to record handoff"),
-        );
-      });
-
-      liveSession.on("error", (event) => {
-        log.error({ callSid: authorized.callSid, agent: activeAgent, err: describeError(event.error) }, "realtime session error");
-      });
-
-      await liveSession.connect({ apiKey });
-      log.info({ callSid: authorized.callSid, agent: authorized.startAgent }, "voice session connected");
-      // The agent speaks first, like a person who placed the call.
-      liveSession.transport.sendEvent({ type: "response.create" });
+      context = await callerContext(authorized.userId, sessionId);
+      await connectCompanion(authorized.startAgent, authorized.opening);
     } catch (error) {
       log.error({ callSid: authorized.callSid, err: describeError(error) }, "failed to start voice session");
       socket.close(1011, "realtime unavailable");
@@ -135,10 +169,14 @@ export function handleTwilioMediaStream(socket: WebSocket, { apiKey, model, log,
   });
 
   socket.on("close", () => {
+    closed = true;
     clearTimeout(startTimer);
     clearTimeout(maxDurationTimer);
+    const segment = current;
+    current = null;
     try {
-      session?.close();
+      segment?.leg.close();
+      segment?.session.close();
     } catch {
       // Already closed by the transport.
     }

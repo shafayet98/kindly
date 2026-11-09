@@ -5,12 +5,21 @@ test("browser call: agent speaks, UI switch keeps the same session, end call is 
   await signIn(page, "demo.patient@example.com");
   await expect(page).toHaveURL(/\/dashboard$/);
   await page.goto("/call?agent=milo");
+  const secrets: Record<string, unknown>[] = [];
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/voice/session")) secrets.push(request.postDataJSON());
+  });
   await page.getByRole("button", { name: "Start talking to Milo" }).click();
   await expect(page.getByText(/Milo is speaking|Listening/)).toBeVisible({ timeout: 30_000 });
 
   await page.getByRole("button", { name: "Talk to Sarah" }).click();
   await expect(page.getByRole("heading", { name: "Sarah" })).toBeVisible();
   await expect(page.getByText(/Sarah is speaking|Listening/)).toBeVisible({ timeout: 30_000 });
+  // Sarah joins in her own voice: a new session for her, continuing the same call.
+  expect(secrets).toEqual([
+    { agent: "milo", topic: null },
+    { agent: "sarah", continueSessionId: expect.any(String), via: "ui" },
+  ]);
 
   await page.getByRole("button", { name: "End call" }).click();
   await expect(page.getByText("Call ended")).toBeVisible();
@@ -78,6 +87,13 @@ test.describe("voice API security", () => {
       const userId = await appUserId(account.authUserId);
       const consents = await db.execute<{ purpose: string }>(sql`select purpose from consents where user_id = ${userId} and status = 'granted'`);
       expect(consents.map((row) => row.purpose)).toEqual(["browser_voice"]);
+
+      // With voice allowed, they still can't get a voice secret by continuing someone else's call.
+      const [alexSession] = await db.execute<{ id: string }>(
+        sql`select s.id from call_sessions s join users u on u.id = s.user_id where u.display_name = 'Alex Rivera' order by s.started_at desc limit 1`,
+      );
+      const continueOther = await page.request.post("/api/voice/session", { data: { agent: "sarah", continueSessionId: alexSession.id }, headers: { Origin: baseURL! } });
+      expect(continueOther.status()).toBe(404);
     } finally {
       await deleteUser(account.authUserId);
     }
