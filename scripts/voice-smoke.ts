@@ -8,7 +8,7 @@ import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import { localClock } from "@/lib/scheduling/occurrences";
 import { runTool } from "@/lib/agents/tools/run";
-import { createVoiceAgent, type CallOpening, type VoiceAgentKey } from "@/lib/agents/voice-agents";
+import { createVoiceAgent, isVoiceAgentKey, type CallOpening, type VoiceAgentKey } from "@/lib/agents/voice-agents";
 import { callerContext, createCallSession, endCallSession, recordHandoff } from "@/lib/voice/sessions";
 import { handoffBriefing, type Turn } from "@/lib/voice/privacy";
 
@@ -45,7 +45,7 @@ async function connect(agent: VoiceAgentKey, opening: CallOpening) {
   const voiceAgent = createVoiceAgent({
     agent,
     opening,
-    familiarity: { personName: context.personName, met: met.has(agent) },
+    familiarity: { personName: context.personName, met: [...met].filter(isVoiceAgentKey) },
     invoke: async (who, name, input) => {
       toolCalls.push(`${who}:${name}`);
       return runTool({ userId: user.id, sessionId, agent: who, channel: "browser", timezone: user.timezone }, name, input);

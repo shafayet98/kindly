@@ -3,7 +3,7 @@ import { RealtimeSession } from "@openai/agents/realtime";
 import { TwilioRealtimeTransportLayer } from "@openai/agents-extensions";
 import type { FastifyBaseLogger } from "fastify";
 import { runTool } from "@/lib/agents/tools/run";
-import { createVoiceAgent, type CallOpening, type VoiceAgentKey } from "@/lib/agents/voice-agents";
+import { createVoiceAgent, isVoiceAgentKey, type CallOpening, type VoiceAgentKey } from "@/lib/agents/voice-agents";
 import { callerContext, createCallSession, endCallSession, MAX_SESSION_MINUTES, recordHandoff } from "./sessions";
 import { summarizeConversation, type TranscriptSegment } from "@/lib/conversations/summary";
 import { handoffBriefing } from "./privacy";
@@ -72,7 +72,7 @@ export function handleTwilioMediaStream(socket: WebSocket, { apiKey, model, log,
     const voiceAgent = createVoiceAgent({
       agent,
       opening,
-      familiarity: { personName: context.personName, met: context.met.includes(agent) || metThisCall.has(agent) },
+      familiarity: { personName: context.personName, met: [...new Set([...context.met.filter(isVoiceAgentKey), ...metThisCall])] },
       invoke: (who, name, input) => runTool({ userId: authorized.userId, sessionId: currentSessionId, agent: who, channel: "phone", timezone: authorized.timezone }, name, input),
       onTransfer: (to, request) => transfer(agent, to, request),
     });

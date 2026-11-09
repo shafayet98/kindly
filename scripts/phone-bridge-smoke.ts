@@ -123,7 +123,7 @@ const handoffEvents = transferSession
   ? await db.select({ payload: schema.agentEvents.structuredPayload }).from(schema.agentEvents).where(and(eq(schema.agentEvents.sessionId, transferSession.id), eq(schema.agentEvents.eventType, "handoff")))
   : [];
 console.log("transfer -> companions:", companions.map((c) => `${c.agent} (${c.session.currentAgent.voice})`).join(", "));
-console.log(`  Milo's "one moment" line: ${holdSeconds.toFixed(1)} s of audio; Natalie afterwards: ${natalieSeconds.toFixed(1)} s`);
+console.log(`  Milo's hold line: ${holdSeconds.toFixed(1)} s of audio; Natalie afterwards: ${natalieSeconds.toFixed(1)} s`);
 console.log("  stored handoffs:", handoffEvents.map((event) => `${event.payload.from}->${event.payload.to} (${event.payload.via})`), "active agent:", transferSession?.active);
 
 await app.close();

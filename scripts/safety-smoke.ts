@@ -18,7 +18,7 @@ async function converse(agent: VoiceAgentKey, message: string) {
   const start = createVoiceAgent({
     agent: agent,
     opening: { reason: "user_started" },
-    familiarity: { personName: "Alex", met: true },
+    familiarity: { personName: "Alex", met: ["milo", "natalie", "sarah"] },
     // These checks stay with one companion; a transfer would show up as a missing reply.
     onTransfer: async () => undefined,
     invoke: async (caller, name, input) => {
